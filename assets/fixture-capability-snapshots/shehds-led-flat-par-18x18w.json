@@ -1,0 +1,239 @@
+{
+  "fixture_profile_id": "a7e65651-2156-4719-a0cb-b4bba5dad426",
+  "manufacturer": "Shehds",
+  "modes": [
+    {
+      "channel_count": 10,
+      "channels": [
+        {
+          "channel_offset": 1,
+          "detail_kind": "range",
+          "name": "Dimmer",
+          "rich_keys": [
+            "range",
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Dimmer",
+            "range": {
+              "highValue": 1.0,
+              "lowValue": 0.0
+            },
+            "staticValue": {
+              "value": 255
+            },
+            "type": "MASTER_DIMMER"
+          },
+          "type": "MASTER_DIMMER"
+        },
+        {
+          "channel_offset": 2,
+          "detail_kind": null,
+          "name": "Red",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Red",
+            "type": "RED"
+          },
+          "type": "RED"
+        },
+        {
+          "channel_offset": 3,
+          "detail_kind": null,
+          "name": "Green",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Green",
+            "type": "GREEN"
+          },
+          "type": "GREEN"
+        },
+        {
+          "channel_offset": 4,
+          "detail_kind": null,
+          "name": "Blue",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Blue",
+            "type": "BLUE"
+          },
+          "type": "BLUE"
+        },
+        {
+          "channel_offset": 5,
+          "detail_kind": null,
+          "name": "White",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "White",
+            "type": "WARM_WHITE"
+          },
+          "type": "WARM_WHITE"
+        },
+        {
+          "channel_offset": 6,
+          "detail_kind": null,
+          "name": "Amber",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Amber",
+            "type": "AMBER"
+          },
+          "type": "AMBER"
+        },
+        {
+          "channel_offset": 7,
+          "detail_kind": null,
+          "name": "UV",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "UV",
+            "type": "UV"
+          },
+          "type": "UV"
+        },
+        {
+          "channel_offset": 8,
+          "detail_kind": "static",
+          "name": "Strobe",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Strobe",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "SHUTTER"
+          },
+          "type": "SHUTTER"
+        },
+        {
+          "channel_offset": 9,
+          "detail_kind": "static",
+          "name": "Function",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Function",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 10,
+          "detail_kind": "static",
+          "name": "Function Speed",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Function Speed",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        }
+      ],
+      "name": "10 Channel"
+    },
+    {
+      "channel_count": 6,
+      "channels": [
+        {
+          "channel_offset": 1,
+          "detail_kind": null,
+          "name": "Red",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Red",
+            "type": "RED"
+          },
+          "type": "RED"
+        },
+        {
+          "channel_offset": 2,
+          "detail_kind": null,
+          "name": "Green",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Green",
+            "type": "GREEN"
+          },
+          "type": "GREEN"
+        },
+        {
+          "channel_offset": 3,
+          "detail_kind": null,
+          "name": "Blue",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Blue",
+            "type": "BLUE"
+          },
+          "type": "BLUE"
+        },
+        {
+          "channel_offset": 4,
+          "detail_kind": null,
+          "name": "White",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "White",
+            "type": "WARM_WHITE"
+          },
+          "type": "WARM_WHITE"
+        },
+        {
+          "channel_offset": 5,
+          "detail_kind": null,
+          "name": "Amber",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Amber",
+            "type": "AMBER"
+          },
+          "type": "AMBER"
+        },
+        {
+          "channel_offset": 6,
+          "detail_kind": null,
+          "name": "UV",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "UV",
+            "type": "UV"
+          },
+          "type": "UV"
+        }
+      ],
+      "name": "6 Channel"
+    }
+  ],
+  "name": "Aluminum Alloy LED Flat Par 18x18W",
+  "source_file": "shehds-led-flat-par-18x18w.json",
+  "type": "FIXTURE_PROFILE",
+  "version": 1
+}

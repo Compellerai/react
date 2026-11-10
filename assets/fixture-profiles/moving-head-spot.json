@@ -1,0 +1,91 @@
+{
+  "schema": "react-ofl-mvp-v1",
+  "manufacturer": "Open Fixture Library Sample",
+  "model": "Moving Head Spot Beam",
+  "fixtureKind": "spot",
+  "commerce": {
+    "priceTier": "pro",
+    "streetPriceRange": "$600-$2500",
+    "recommendationNotes": "Moving-head beam/spot class for venue preview and higher-value profiles."
+  },
+  "modes": [
+    {
+      "name": "12-channel spot",
+      "shortName": "12ch",
+      "channels": [
+        {
+          "name": "Pan",
+          "attribute": "Pan",
+          "defaultValue": 127,
+          "blackoutValue": 127
+        },
+        {
+          "name": "Tilt",
+          "attribute": "Tilt",
+          "defaultValue": 127,
+          "blackoutValue": 127
+        },
+        {
+          "name": "Dimmer",
+          "attribute": "Dimmer",
+          "defaultValue": 0,
+          "blackoutValue": 0
+        },
+        {
+          "name": "Strobe",
+          "attribute": "Strobe",
+          "defaultValue": 0,
+          "blackoutValue": 0
+        },
+        {
+          "name": "Color Wheel",
+          "attribute": "ColorWheel",
+          "defaultValue": 0,
+          "blackoutValue": 0
+        },
+        {
+          "name": "Gobo Slot",
+          "attribute": "GoboSlot",
+          "defaultValue": 0,
+          "blackoutValue": 0
+        },
+        {
+          "name": "Gobo Rotation",
+          "attribute": "GoboRotation",
+          "defaultValue": 0,
+          "blackoutValue": 0
+        },
+        {
+          "name": "Prism",
+          "attribute": "Prism",
+          "defaultValue": 0,
+          "blackoutValue": 0
+        },
+        {
+          "name": "Zoom",
+          "attribute": "Zoom",
+          "defaultValue": 0,
+          "blackoutValue": 0
+        },
+        {
+          "name": "Focus",
+          "attribute": "Focus",
+          "defaultValue": 0,
+          "blackoutValue": 0
+        },
+        {
+          "name": "Red",
+          "attribute": "Red",
+          "defaultValue": 0,
+          "blackoutValue": 0
+        },
+        {
+          "name": "Blue",
+          "attribute": "Blue",
+          "defaultValue": 0,
+          "blackoutValue": 0
+        }
+      ]
+    }
+  ]
+}

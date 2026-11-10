@@ -1,0 +1,111 @@
+{
+  "staticWarning": false,
+  "fixtureProfile": {
+    "id": "a7e65651-2156-4719-a0cb-b4bba5dad426",
+    "name": "Aluminum Alloy LED Flat Par 18x18W",
+    "manufacturer": "Shehds",
+    "category": "PARs",
+    "partNo": "SHE-FAP1818F",
+    "metadata": {
+      "atlaId": "a7e65651-2156-4719-a0cb-b4bba5dad426",
+      "parserVersion": "0.1.0",
+      "source": "ATLABASE"
+    },
+    "mode": [
+      {
+        "id": "c86ce9ca-b77b-4e7e-b98c-6d13fd2f9f11",
+        "name": "10 Channel",
+        "attribute": [
+          {
+            "name": "Dimmer",
+            "type": "MASTER_DIMMER",
+            "range": {
+              "lowValue": 0.0,
+              "highValue": 1.0
+            },
+            "staticValue": {
+              "value": 255
+            }
+          },
+          {
+            "name": "Red",
+            "type": "RED"
+          },
+          {
+            "name": "Green",
+            "type": "GREEN"
+          },
+          {
+            "name": "Blue",
+            "type": "BLUE"
+          },
+          {
+            "name": "White",
+            "type": "WARM_WHITE"
+          },
+          {
+            "name": "Amber",
+            "type": "AMBER"
+          },
+          {
+            "name": "UV",
+            "type": "UV"
+          },
+          {
+            "name": "Strobe",
+            "type": "SHUTTER",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Function",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Function Speed",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "a89d82c5-e131-4b23-af85-174682839ca5",
+        "name": "6 Channel",
+        "attribute": [
+          {
+            "name": "Red",
+            "type": "RED"
+          },
+          {
+            "name": "Green",
+            "type": "GREEN"
+          },
+          {
+            "name": "Blue",
+            "type": "BLUE"
+          },
+          {
+            "name": "White",
+            "type": "WARM_WHITE"
+          },
+          {
+            "name": "Amber",
+            "type": "AMBER"
+          },
+          {
+            "name": "UV",
+            "type": "UV"
+          }
+        ]
+      }
+    ]
+  },
+  "version": 1,
+  "type": "FIXTURE_PROFILE"
+}

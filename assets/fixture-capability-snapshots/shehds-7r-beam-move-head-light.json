@@ -1,0 +1,1196 @@
+{
+  "fixture_profile_id": "01cc2583-e793-4efc-8b49-448ac7d4ab21",
+  "manufacturer": "Shehds",
+  "modes": [
+    {
+      "channel_count": 16,
+      "channels": [
+        {
+          "channel_offset": 1,
+          "detail_kind": "color_wheel",
+          "name": "Color",
+          "rich_keys": [
+            "colorWheelSetting"
+          ],
+          "slot_count": 15,
+          "source_attribute": {
+            "colorWheelSetting": {
+              "colors": [
+                {
+                  "color": [
+                    {
+                      "b": 1.0,
+                      "g": 0.9058823529411765,
+                      "r": 0.8901960784313725
+                    }
+                  ],
+                  "highValue": 4.0,
+                  "lowValue": 0.0,
+                  "name": "Open"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.0,
+                      "g": 0.0,
+                      "r": 0.6509803921568628
+                    }
+                  ],
+                  "highValue": 12.0,
+                  "lowValue": 9.0,
+                  "name": "Dark Red"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.24705882352941178,
+                      "g": 0.396078431372549,
+                      "r": 0.24705882352941178
+                    }
+                  ],
+                  "highValue": 21.0,
+                  "lowValue": 18.0,
+                  "name": "Dark Green"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 1.0,
+                      "g": 0.0,
+                      "r": 0.0
+                    }
+                  ],
+                  "highValue": 29.0,
+                  "lowValue": 26.0,
+                  "name": "Blue"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.25098039215686274,
+                      "g": 0.5333333333333333,
+                      "r": 1.0
+                    }
+                  ],
+                  "highValue": 38.0,
+                  "lowValue": 35.0,
+                  "name": "Light Orange"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.0,
+                      "g": 1.0,
+                      "r": 1.0
+                    }
+                  ],
+                  "highValue": 46.0,
+                  "lowValue": 43.0,
+                  "name": "Yellow"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.5411764705882353,
+                      "g": 0.19215686274509805,
+                      "r": 0.3843137254901961
+                    }
+                  ],
+                  "highValue": 55.0,
+                  "lowValue": 52.0,
+                  "name": "Dark Lavender"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.0,
+                      "g": 0.3568627450980392,
+                      "r": 0.9490196078431372
+                    }
+                  ],
+                  "highValue": 63.0,
+                  "lowValue": 60.0,
+                  "name": "Dark Orange"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.7176470588235294,
+                      "g": 0.0,
+                      "r": 0.0
+                    }
+                  ],
+                  "highValue": 72.0,
+                  "lowValue": 69.0,
+                  "name": "Dark Blue"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.5254901960784314,
+                      "g": 0.0,
+                      "r": 0.5843137254901961
+                    }
+                  ],
+                  "highValue": 81.0,
+                  "lowValue": 77.0,
+                  "name": "Purple"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.0,
+                      "g": 0.5411764705882353,
+                      "r": 0.0
+                    }
+                  ],
+                  "highValue": 89.0,
+                  "lowValue": 86.0,
+                  "name": "Green"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.0,
+                      "g": 0.3764705882352941,
+                      "r": 1.0
+                    }
+                  ],
+                  "highValue": 98.0,
+                  "lowValue": 94.0,
+                  "name": "Orange"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.5490196078431373,
+                      "g": 1.0,
+                      "r": 1.0
+                    }
+                  ],
+                  "highValue": 106.0,
+                  "lowValue": 103.0,
+                  "name": "Light Yellow"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.796078431372549,
+                      "g": 0.7529411764705882,
+                      "r": 1.0
+                    }
+                  ],
+                  "highValue": 115.0,
+                  "lowValue": 111.0,
+                  "name": "Pink"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 1.0,
+                      "g": 0.43529411764705883,
+                      "r": 0.43529411764705883
+                    }
+                  ],
+                  "highValue": 123.0,
+                  "lowValue": 120.0,
+                  "name": "CTB"
+                }
+              ]
+            },
+            "name": "Color",
+            "type": "COLOR_WHEEL"
+          },
+          "type": "COLOR_WHEEL"
+        },
+        {
+          "channel_offset": 2,
+          "detail_kind": "static",
+          "name": "Strobe",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Strobe",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "SHUTTER"
+          },
+          "type": "SHUTTER"
+        },
+        {
+          "channel_offset": 3,
+          "detail_kind": "range",
+          "name": "Dimming",
+          "rich_keys": [
+            "range"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Dimming",
+            "range": {
+              "highValue": 1.0,
+              "lowValue": 0.0
+            },
+            "type": "DIMMER"
+          },
+          "type": "DIMMER"
+        },
+        {
+          "channel_offset": 4,
+          "detail_kind": "gobo",
+          "name": "Gobo",
+          "rich_keys": [
+            "goboSetting"
+          ],
+          "slot_count": 18,
+          "source_attribute": {
+            "goboSetting": {
+              "steps": [
+                {
+                  "highValue": 3.0,
+                  "lowValue": 0.0,
+                  "name": "Open"
+                },
+                {
+                  "highValue": 7.0,
+                  "lowValue": 4.0,
+                  "name": "Beam 1"
+                },
+                {
+                  "highValue": 11.0,
+                  "lowValue": 8.0,
+                  "name": "Beam 2"
+                },
+                {
+                  "highValue": 15.0,
+                  "lowValue": 12.0,
+                  "name": "Beam 3"
+                },
+                {
+                  "highValue": 19.0,
+                  "lowValue": 16.0,
+                  "name": "Beam 4"
+                },
+                {
+                  "highValue": 23.0,
+                  "lowValue": 20.0,
+                  "name": "Beam 5"
+                },
+                {
+                  "highValue": 27.0,
+                  "lowValue": 24.0,
+                  "name": "Beam 6"
+                },
+                {
+                  "highValue": 31.0,
+                  "lowValue": 28.0,
+                  "name": "G08"
+                },
+                {
+                  "highValue": 35.0,
+                  "lowValue": 32.0,
+                  "name": "G09"
+                },
+                {
+                  "highValue": 39.0,
+                  "lowValue": 36.0,
+                  "name": "G10"
+                },
+                {
+                  "highValue": 43.0,
+                  "lowValue": 40.0,
+                  "name": "G11"
+                },
+                {
+                  "highValue": 47.0,
+                  "lowValue": 44.0,
+                  "name": "G12"
+                },
+                {
+                  "highValue": 51.0,
+                  "lowValue": 48.0,
+                  "name": "G13"
+                },
+                {
+                  "highValue": 55.0,
+                  "lowValue": 52.0,
+                  "name": "G14"
+                },
+                {
+                  "highValue": 59.0,
+                  "lowValue": 56.0,
+                  "name": "G15"
+                },
+                {
+                  "highValue": 63.0,
+                  "lowValue": 60.0,
+                  "name": "G16"
+                },
+                {
+                  "highValue": 67.0,
+                  "lowValue": 64.0,
+                  "name": "G17"
+                },
+                {
+                  "highValue": 71.0,
+                  "lowValue": 68.0,
+                  "name": "G18"
+                }
+              ]
+            },
+            "name": "Gobo",
+            "type": "GOBO"
+          },
+          "type": "GOBO"
+        },
+        {
+          "channel_offset": 5,
+          "detail_kind": "prism",
+          "name": "Prism",
+          "rich_keys": [
+            "prismSetting"
+          ],
+          "slot_count": 2,
+          "source_attribute": {
+            "name": "Prism",
+            "prismSetting": {
+              "steps": [
+                {
+                  "highValue": 127.0,
+                  "lowValue": 0.0,
+                  "name": "Open"
+                },
+                {
+                  "highValue": 255.0,
+                  "lowValue": 128.0,
+                  "name": "24-Facet 8+16 Circular Prism"
+                }
+              ]
+            },
+            "type": "PRISM"
+          },
+          "type": "PRISM"
+        },
+        {
+          "channel_offset": 6,
+          "detail_kind": null,
+          "name": "Rotate Prism",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Rotate Prism",
+            "type": "ROTATION"
+          },
+          "type": "ROTATION"
+        },
+        {
+          "channel_offset": 7,
+          "detail_kind": "static",
+          "name": "None",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "None",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 8,
+          "detail_kind": "static",
+          "name": "Frost",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Frost",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 9,
+          "detail_kind": "static",
+          "name": "Focus",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Focus",
+            "staticValue": {
+              "value": 127
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 10,
+          "detail_kind": "movement",
+          "name": "Pan",
+          "rich_keys": [
+            "panSetting",
+            "range"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Pan",
+            "panSetting": {
+              "offset": 0.0,
+              "width": 0.25
+            },
+            "range": {
+              "highValue": 1.0,
+              "lowValue": 0.0
+            },
+            "type": "PAN"
+          },
+          "type": "PAN"
+        },
+        {
+          "channel_offset": 11,
+          "detail_kind": null,
+          "name": "Pan Fine",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Pan Fine",
+            "type": "PAN_FINE"
+          },
+          "type": "PAN_FINE"
+        },
+        {
+          "channel_offset": 12,
+          "detail_kind": "movement",
+          "name": "Tilt",
+          "rich_keys": [
+            "range",
+            "tiltSetting"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Tilt",
+            "range": {
+              "highValue": 1.0,
+              "lowValue": 0.0
+            },
+            "tiltSetting": {
+              "offset": 0.0,
+              "width": 0.5
+            },
+            "type": "TILT"
+          },
+          "type": "TILT"
+        },
+        {
+          "channel_offset": 13,
+          "detail_kind": null,
+          "name": "Tilt Fine",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Tilt Fine",
+            "type": "TILT_FINE"
+          },
+          "type": "TILT_FINE"
+        },
+        {
+          "channel_offset": 14,
+          "detail_kind": "static",
+          "name": "None",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "None",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 15,
+          "detail_kind": "static",
+          "name": "Reset",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Reset",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 16,
+          "detail_kind": "static",
+          "name": "Lamp",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Lamp",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        }
+      ],
+      "name": "16 Channel"
+    },
+    {
+      "channel_count": 20,
+      "channels": [
+        {
+          "channel_offset": 1,
+          "detail_kind": "color_wheel",
+          "name": "Color",
+          "rich_keys": [
+            "colorWheelSetting"
+          ],
+          "slot_count": 15,
+          "source_attribute": {
+            "colorWheelSetting": {
+              "colors": [
+                {
+                  "color": [
+                    {
+                      "b": 1.0,
+                      "g": 0.9058823529411765,
+                      "r": 0.8901960784313725
+                    }
+                  ],
+                  "highValue": 4.0,
+                  "lowValue": 0.0,
+                  "name": "Open"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.0,
+                      "g": 0.0,
+                      "r": 0.6509803921568628
+                    }
+                  ],
+                  "highValue": 12.0,
+                  "lowValue": 9.0,
+                  "name": "Dark Red"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.24705882352941178,
+                      "g": 0.396078431372549,
+                      "r": 0.24705882352941178
+                    }
+                  ],
+                  "highValue": 21.0,
+                  "lowValue": 18.0,
+                  "name": "Dark Green"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 1.0,
+                      "g": 0.0,
+                      "r": 0.0
+                    }
+                  ],
+                  "highValue": 29.0,
+                  "lowValue": 26.0,
+                  "name": "Blue"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.25098039215686274,
+                      "g": 0.5333333333333333,
+                      "r": 1.0
+                    }
+                  ],
+                  "highValue": 38.0,
+                  "lowValue": 35.0,
+                  "name": "Light Orange"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.0,
+                      "g": 1.0,
+                      "r": 1.0
+                    }
+                  ],
+                  "highValue": 46.0,
+                  "lowValue": 43.0,
+                  "name": "Yellow"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.5411764705882353,
+                      "g": 0.19215686274509805,
+                      "r": 0.3843137254901961
+                    }
+                  ],
+                  "highValue": 55.0,
+                  "lowValue": 52.0,
+                  "name": "Dark Lavender"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.0,
+                      "g": 0.3568627450980392,
+                      "r": 0.9490196078431372
+                    }
+                  ],
+                  "highValue": 63.0,
+                  "lowValue": 60.0,
+                  "name": "Dark Orange"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.7176470588235294,
+                      "g": 0.0,
+                      "r": 0.0
+                    }
+                  ],
+                  "highValue": 72.0,
+                  "lowValue": 69.0,
+                  "name": "Dark Blue"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.5254901960784314,
+                      "g": 0.0,
+                      "r": 0.5843137254901961
+                    }
+                  ],
+                  "highValue": 81.0,
+                  "lowValue": 77.0,
+                  "name": "Purple"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.0,
+                      "g": 0.5411764705882353,
+                      "r": 0.0
+                    }
+                  ],
+                  "highValue": 89.0,
+                  "lowValue": 86.0,
+                  "name": "Green"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.0,
+                      "g": 0.3764705882352941,
+                      "r": 1.0
+                    }
+                  ],
+                  "highValue": 98.0,
+                  "lowValue": 94.0,
+                  "name": "Orange"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.5490196078431373,
+                      "g": 1.0,
+                      "r": 1.0
+                    }
+                  ],
+                  "highValue": 106.0,
+                  "lowValue": 103.0,
+                  "name": "Light Yellow"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.796078431372549,
+                      "g": 0.7529411764705882,
+                      "r": 1.0
+                    }
+                  ],
+                  "highValue": 115.0,
+                  "lowValue": 111.0,
+                  "name": "Pink"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 1.0,
+                      "g": 0.43529411764705883,
+                      "r": 0.43529411764705883
+                    }
+                  ],
+                  "highValue": 123.0,
+                  "lowValue": 120.0,
+                  "name": "CTB"
+                }
+              ]
+            },
+            "name": "Color",
+            "type": "COLOR_WHEEL"
+          },
+          "type": "COLOR_WHEEL"
+        },
+        {
+          "channel_offset": 2,
+          "detail_kind": "static",
+          "name": "Strobe",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Strobe",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "SHUTTER"
+          },
+          "type": "SHUTTER"
+        },
+        {
+          "channel_offset": 3,
+          "detail_kind": "range",
+          "name": "Dimming",
+          "rich_keys": [
+            "range"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Dimming",
+            "range": {
+              "highValue": 1.0,
+              "lowValue": 0.0
+            },
+            "type": "DIMMER"
+          },
+          "type": "DIMMER"
+        },
+        {
+          "channel_offset": 4,
+          "detail_kind": "gobo",
+          "name": "Gobo",
+          "rich_keys": [
+            "goboSetting"
+          ],
+          "slot_count": 18,
+          "source_attribute": {
+            "goboSetting": {
+              "steps": [
+                {
+                  "highValue": 3.0,
+                  "lowValue": 0.0,
+                  "name": "Open"
+                },
+                {
+                  "highValue": 7.0,
+                  "lowValue": 4.0,
+                  "name": "Beam 1"
+                },
+                {
+                  "highValue": 11.0,
+                  "lowValue": 8.0,
+                  "name": "Beam 2"
+                },
+                {
+                  "highValue": 15.0,
+                  "lowValue": 12.0,
+                  "name": "Beam 3"
+                },
+                {
+                  "highValue": 19.0,
+                  "lowValue": 16.0,
+                  "name": "Beam 4"
+                },
+                {
+                  "highValue": 23.0,
+                  "lowValue": 20.0,
+                  "name": "Beam 5"
+                },
+                {
+                  "highValue": 27.0,
+                  "lowValue": 24.0,
+                  "name": "Beam 6"
+                },
+                {
+                  "highValue": 31.0,
+                  "lowValue": 28.0,
+                  "name": "G08"
+                },
+                {
+                  "highValue": 35.0,
+                  "lowValue": 32.0,
+                  "name": "G09"
+                },
+                {
+                  "highValue": 39.0,
+                  "lowValue": 36.0,
+                  "name": "G10"
+                },
+                {
+                  "highValue": 43.0,
+                  "lowValue": 40.0,
+                  "name": "G11"
+                },
+                {
+                  "highValue": 47.0,
+                  "lowValue": 44.0,
+                  "name": "G12"
+                },
+                {
+                  "highValue": 51.0,
+                  "lowValue": 48.0,
+                  "name": "G13"
+                },
+                {
+                  "highValue": 55.0,
+                  "lowValue": 52.0,
+                  "name": "G14"
+                },
+                {
+                  "highValue": 59.0,
+                  "lowValue": 56.0,
+                  "name": "G15"
+                },
+                {
+                  "highValue": 63.0,
+                  "lowValue": 60.0,
+                  "name": "G16"
+                },
+                {
+                  "highValue": 67.0,
+                  "lowValue": 64.0,
+                  "name": "G17"
+                },
+                {
+                  "highValue": 71.0,
+                  "lowValue": 68.0,
+                  "name": "G18"
+                }
+              ]
+            },
+            "name": "Gobo",
+            "type": "GOBO"
+          },
+          "type": "GOBO"
+        },
+        {
+          "channel_offset": 5,
+          "detail_kind": "prism",
+          "name": "Prism",
+          "rich_keys": [
+            "prismSetting"
+          ],
+          "slot_count": 2,
+          "source_attribute": {
+            "name": "Prism",
+            "prismSetting": {
+              "steps": [
+                {
+                  "highValue": 127.0,
+                  "lowValue": 0.0,
+                  "name": "Open"
+                },
+                {
+                  "highValue": 255.0,
+                  "lowValue": 128.0,
+                  "name": "24-Facet 8+16 Circular Prism"
+                }
+              ]
+            },
+            "type": "PRISM"
+          },
+          "type": "PRISM"
+        },
+        {
+          "channel_offset": 6,
+          "detail_kind": null,
+          "name": "Rotate Prism",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Rotate Prism",
+            "type": "ROTATION"
+          },
+          "type": "ROTATION"
+        },
+        {
+          "channel_offset": 7,
+          "detail_kind": "static",
+          "name": "None",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "None",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 8,
+          "detail_kind": "static",
+          "name": "Frost",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Frost",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 9,
+          "detail_kind": "static",
+          "name": "Focus",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Focus",
+            "staticValue": {
+              "value": 127
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 10,
+          "detail_kind": "movement",
+          "name": "Pan",
+          "rich_keys": [
+            "panSetting",
+            "range"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Pan",
+            "panSetting": {
+              "offset": 0.0,
+              "width": 0.25
+            },
+            "range": {
+              "highValue": 1.0,
+              "lowValue": 0.0
+            },
+            "type": "PAN"
+          },
+          "type": "PAN"
+        },
+        {
+          "channel_offset": 11,
+          "detail_kind": null,
+          "name": "Pan Fine",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Pan Fine",
+            "type": "PAN_FINE"
+          },
+          "type": "PAN_FINE"
+        },
+        {
+          "channel_offset": 12,
+          "detail_kind": "movement",
+          "name": "Tilt",
+          "rich_keys": [
+            "range",
+            "tiltSetting"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Tilt",
+            "range": {
+              "highValue": 1.0,
+              "lowValue": 0.0
+            },
+            "tiltSetting": {
+              "offset": 0.0,
+              "width": 0.5
+            },
+            "type": "TILT"
+          },
+          "type": "TILT"
+        },
+        {
+          "channel_offset": 13,
+          "detail_kind": null,
+          "name": "Tilt Fine",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Tilt Fine",
+            "type": "TILT_FINE"
+          },
+          "type": "TILT_FINE"
+        },
+        {
+          "channel_offset": 14,
+          "detail_kind": "static",
+          "name": "None",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "None",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 15,
+          "detail_kind": "static",
+          "name": "Reset",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Reset",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 16,
+          "detail_kind": "static",
+          "name": "Lamp",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Lamp",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 17,
+          "detail_kind": "static",
+          "name": "Pan/Tilt Speed",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Pan/Tilt Speed",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 18,
+          "detail_kind": "static",
+          "name": "Color Speed",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Color Speed",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 19,
+          "detail_kind": "static",
+          "name": "Dimmer-Prism Speed",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Dimmer-Prism Speed",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 20,
+          "detail_kind": "static",
+          "name": "Gobo Speed",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Gobo Speed",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        }
+      ],
+      "name": "20 Channel"
+    }
+  ],
+  "name": "7R Beam Move Head Light",
+  "source_file": "shehds-7r-beam-move-head-light.json",
+  "type": "FIXTURE_PROFILE",
+  "version": 1
+}

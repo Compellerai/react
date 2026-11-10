@@ -1,0 +1,663 @@
+{
+  "fixture_profile_id": "36f69c64-f994-4a56-b5ee-2678540f62c4",
+  "manufacturer": "Shehds",
+  "modes": [
+    {
+      "channel_count": 38,
+      "channels": [
+        {
+          "channel_offset": 1,
+          "detail_kind": "movement",
+          "name": "Tilt",
+          "rich_keys": [
+            "range",
+            "tiltSetting"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Tilt",
+            "range": {
+              "highValue": 1.0,
+              "lowValue": 0.0
+            },
+            "tiltSetting": {
+              "offset": 0.0,
+              "width": 0.5
+            },
+            "type": "TILT"
+          },
+          "type": "TILT"
+        },
+        {
+          "channel_offset": 2,
+          "detail_kind": "static",
+          "name": "Tilt Speed",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Tilt Speed",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 3,
+          "detail_kind": "static",
+          "name": "Built-In Effects",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Built-In Effects",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 4,
+          "detail_kind": "static",
+          "name": "Built-In Effects Speed",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Built-In Effects Speed",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 5,
+          "detail_kind": "range",
+          "name": "Master Dimmer",
+          "rich_keys": [
+            "range",
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Master Dimmer",
+            "range": {
+              "highValue": 1.0,
+              "lowValue": 0.0
+            },
+            "staticValue": {
+              "value": 255
+            },
+            "type": "MASTER_DIMMER"
+          },
+          "type": "MASTER_DIMMER"
+        },
+        {
+          "channel_offset": 6,
+          "detail_kind": "static",
+          "name": "Strobe",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Strobe",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "SHUTTER"
+          },
+          "type": "SHUTTER"
+        },
+        {
+          "channel_offset": 7,
+          "detail_kind": null,
+          "name": "Red 1",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Red 1",
+            "type": "RED"
+          },
+          "type": "RED"
+        },
+        {
+          "channel_offset": 8,
+          "detail_kind": null,
+          "name": "Green 1",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Green 1",
+            "type": "GREEN"
+          },
+          "type": "GREEN"
+        },
+        {
+          "channel_offset": 9,
+          "detail_kind": null,
+          "name": "Blue 1",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Blue 1",
+            "type": "BLUE"
+          },
+          "type": "BLUE"
+        },
+        {
+          "channel_offset": 10,
+          "detail_kind": null,
+          "name": "White 1",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "White 1",
+            "type": "WARM_WHITE"
+          },
+          "type": "WARM_WHITE"
+        },
+        {
+          "channel_offset": 11,
+          "detail_kind": null,
+          "name": "Red 2",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Red 2",
+            "type": "RED"
+          },
+          "type": "RED"
+        },
+        {
+          "channel_offset": 12,
+          "detail_kind": null,
+          "name": "Green 2",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Green 2",
+            "type": "GREEN"
+          },
+          "type": "GREEN"
+        },
+        {
+          "channel_offset": 13,
+          "detail_kind": null,
+          "name": "Blue 2",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Blue 2",
+            "type": "BLUE"
+          },
+          "type": "BLUE"
+        },
+        {
+          "channel_offset": 14,
+          "detail_kind": null,
+          "name": "White 2",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "White 2",
+            "type": "WARM_WHITE"
+          },
+          "type": "WARM_WHITE"
+        },
+        {
+          "channel_offset": 15,
+          "detail_kind": null,
+          "name": "Red 3",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Red 3",
+            "type": "RED"
+          },
+          "type": "RED"
+        },
+        {
+          "channel_offset": 16,
+          "detail_kind": null,
+          "name": "Green 3",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Green 3",
+            "type": "GREEN"
+          },
+          "type": "GREEN"
+        },
+        {
+          "channel_offset": 17,
+          "detail_kind": null,
+          "name": "Blue 3",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Blue 3",
+            "type": "BLUE"
+          },
+          "type": "BLUE"
+        },
+        {
+          "channel_offset": 18,
+          "detail_kind": null,
+          "name": "White 3",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "White 3",
+            "type": "WARM_WHITE"
+          },
+          "type": "WARM_WHITE"
+        },
+        {
+          "channel_offset": 19,
+          "detail_kind": null,
+          "name": "Red 4",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Red 4",
+            "type": "RED"
+          },
+          "type": "RED"
+        },
+        {
+          "channel_offset": 20,
+          "detail_kind": null,
+          "name": "Green 4",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Green 4",
+            "type": "GREEN"
+          },
+          "type": "GREEN"
+        },
+        {
+          "channel_offset": 21,
+          "detail_kind": null,
+          "name": "Blue 4",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Blue 4",
+            "type": "BLUE"
+          },
+          "type": "BLUE"
+        },
+        {
+          "channel_offset": 22,
+          "detail_kind": null,
+          "name": "White 4",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "White 4",
+            "type": "WARM_WHITE"
+          },
+          "type": "WARM_WHITE"
+        },
+        {
+          "channel_offset": 23,
+          "detail_kind": null,
+          "name": "Red 5",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Red 5",
+            "type": "RED"
+          },
+          "type": "RED"
+        },
+        {
+          "channel_offset": 24,
+          "detail_kind": null,
+          "name": "Green 5",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Green 5",
+            "type": "GREEN"
+          },
+          "type": "GREEN"
+        },
+        {
+          "channel_offset": 25,
+          "detail_kind": null,
+          "name": "Blue 5",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Blue 5",
+            "type": "BLUE"
+          },
+          "type": "BLUE"
+        },
+        {
+          "channel_offset": 26,
+          "detail_kind": null,
+          "name": "White 5",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "White 5",
+            "type": "WARM_WHITE"
+          },
+          "type": "WARM_WHITE"
+        },
+        {
+          "channel_offset": 27,
+          "detail_kind": null,
+          "name": "Red 6",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Red 6",
+            "type": "RED"
+          },
+          "type": "RED"
+        },
+        {
+          "channel_offset": 28,
+          "detail_kind": null,
+          "name": "Green 6",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Green 6",
+            "type": "GREEN"
+          },
+          "type": "GREEN"
+        },
+        {
+          "channel_offset": 29,
+          "detail_kind": null,
+          "name": "Blue 6",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Blue 6",
+            "type": "BLUE"
+          },
+          "type": "BLUE"
+        },
+        {
+          "channel_offset": 30,
+          "detail_kind": null,
+          "name": "White 6",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "White 6",
+            "type": "WARM_WHITE"
+          },
+          "type": "WARM_WHITE"
+        },
+        {
+          "channel_offset": 31,
+          "detail_kind": null,
+          "name": "Red 7",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Red 7",
+            "type": "RED"
+          },
+          "type": "RED"
+        },
+        {
+          "channel_offset": 32,
+          "detail_kind": null,
+          "name": "Green 7",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Green 7",
+            "type": "GREEN"
+          },
+          "type": "GREEN"
+        },
+        {
+          "channel_offset": 33,
+          "detail_kind": null,
+          "name": "Blue 7",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Blue 7",
+            "type": "BLUE"
+          },
+          "type": "BLUE"
+        },
+        {
+          "channel_offset": 34,
+          "detail_kind": null,
+          "name": "White 7",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "White 7",
+            "type": "WARM_WHITE"
+          },
+          "type": "WARM_WHITE"
+        },
+        {
+          "channel_offset": 35,
+          "detail_kind": null,
+          "name": "Red 8",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Red 8",
+            "type": "RED"
+          },
+          "type": "RED"
+        },
+        {
+          "channel_offset": 36,
+          "detail_kind": null,
+          "name": "Green 8",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Green 8",
+            "type": "GREEN"
+          },
+          "type": "GREEN"
+        },
+        {
+          "channel_offset": 37,
+          "detail_kind": null,
+          "name": "Blue 8",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Blue 8",
+            "type": "BLUE"
+          },
+          "type": "BLUE"
+        },
+        {
+          "channel_offset": 38,
+          "detail_kind": null,
+          "name": "White 8",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "White 8",
+            "type": "WARM_WHITE"
+          },
+          "type": "WARM_WHITE"
+        }
+      ],
+      "name": "38 Channel"
+    },
+    {
+      "channel_count": 9,
+      "channels": [
+        {
+          "channel_offset": 1,
+          "detail_kind": "movement",
+          "name": "Tilt",
+          "rich_keys": [
+            "range",
+            "tiltSetting"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Tilt",
+            "range": {
+              "highValue": 1.0,
+              "lowValue": 0.0
+            },
+            "tiltSetting": {
+              "offset": 0.0,
+              "width": 0.5
+            },
+            "type": "TILT"
+          },
+          "type": "TILT"
+        },
+        {
+          "channel_offset": 2,
+          "detail_kind": "static",
+          "name": "Tilt Speed",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Tilt Speed",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 3,
+          "detail_kind": "static",
+          "name": "Built-In Effects",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Built-In Effects",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 4,
+          "detail_kind": "static",
+          "name": "Built-In Effects Speed",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Built-In Effects Speed",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 5,
+          "detail_kind": "range",
+          "name": "Master Dimmer",
+          "rich_keys": [
+            "range",
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Master Dimmer",
+            "range": {
+              "highValue": 1.0,
+              "lowValue": 0.0
+            },
+            "staticValue": {
+              "value": 255
+            },
+            "type": "MASTER_DIMMER"
+          },
+          "type": "MASTER_DIMMER"
+        },
+        {
+          "channel_offset": 6,
+          "detail_kind": null,
+          "name": "Red",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Red",
+            "type": "RED"
+          },
+          "type": "RED"
+        },
+        {
+          "channel_offset": 7,
+          "detail_kind": null,
+          "name": "Green",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Green",
+            "type": "GREEN"
+          },
+          "type": "GREEN"
+        },
+        {
+          "channel_offset": 8,
+          "detail_kind": null,
+          "name": "Blue",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Blue",
+            "type": "BLUE"
+          },
+          "type": "BLUE"
+        },
+        {
+          "channel_offset": 9,
+          "detail_kind": null,
+          "name": "White",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "White",
+            "type": "WARM_WHITE"
+          },
+          "type": "WARM_WHITE"
+        }
+      ],
+      "name": "9 Channel"
+    }
+  ],
+  "name": "LED Beam 8x12W RGBW",
+  "source_file": "shehds-led-beam-8x12w-rgbw.json",
+  "type": "FIXTURE_PROFILE",
+  "version": 1
+}

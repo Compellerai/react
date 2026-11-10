@@ -1,0 +1,371 @@
+{
+  "fixture_profile_id": "bfd9b5ac-8e87-443d-8975-09576d4970b9",
+  "manufacturer": "Chauvet DJ",
+  "modes": [
+    {
+      "channel_count": 7,
+      "channels": [
+        {
+          "channel_offset": 1,
+          "detail_kind": "static",
+          "name": "Auto Programs",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Auto Programs",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 2,
+          "detail_kind": "static",
+          "name": "Auto Speed/Sound Sensitivity",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Auto Speed/Sound Sensitivity",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 3,
+          "detail_kind": "range",
+          "name": "Dimmer",
+          "rich_keys": [
+            "range"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Dimmer",
+            "range": {
+              "highValue": 1.0,
+              "lowValue": 0.0
+            },
+            "type": "DIMMER"
+          },
+          "type": "DIMMER"
+        },
+        {
+          "channel_offset": 4,
+          "detail_kind": "static",
+          "name": "Shutter",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Shutter",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "SHUTTER"
+          },
+          "type": "SHUTTER"
+        },
+        {
+          "channel_offset": 5,
+          "detail_kind": "color_wheel",
+          "name": "Color Wheel",
+          "rich_keys": [
+            "colorWheelSetting"
+          ],
+          "slot_count": 14,
+          "source_attribute": {
+            "colorWheelSetting": {
+              "colors": [
+                {
+                  "color": [
+                    {
+                      "b": 0.8941176470588236,
+                      "g": 0.9372549019607843,
+                      "r": 1.0
+                    }
+                  ],
+                  "highValue": 4.0,
+                  "lowValue": 0.0,
+                  "name": "Open"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.0,
+                      "g": 0.0,
+                      "r": 0.8352941176470589
+                    }
+                  ],
+                  "highValue": 9.0,
+                  "lowValue": 5.0,
+                  "name": "Red"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.0,
+                      "g": 0.5411764705882353,
+                      "r": 0.0
+                    }
+                  ],
+                  "highValue": 14.0,
+                  "lowValue": 10.0,
+                  "name": "Green"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 1.0,
+                      "g": 0.0,
+                      "r": 0.0
+                    }
+                  ],
+                  "highValue": 19.0,
+                  "lowValue": 15.0,
+                  "name": "Blue"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.0,
+                      "g": 1.0,
+                      "r": 1.0
+                    }
+                  ],
+                  "highValue": 24.0,
+                  "lowValue": 20.0,
+                  "name": "Yellow"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.0,
+                      "g": 0.7490196078431373,
+                      "r": 1.0
+                    }
+                  ],
+                  "highValue": 29.0,
+                  "lowValue": 25.0,
+                  "name": "Amber"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.796078431372549,
+                      "g": 0.7529411764705882,
+                      "r": 1.0
+                    }
+                  ],
+                  "highValue": 34.0,
+                  "lowValue": 30.0,
+                  "name": "Pink"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.0,
+                      "g": 1.0,
+                      "r": 0.8666666666666667
+                    }
+                  ],
+                  "highValue": 39.0,
+                  "lowValue": 35.0,
+                  "name": "Lime"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 1.0,
+                      "g": 0.5686274509803921,
+                      "r": 0.5686274509803921
+                    }
+                  ],
+                  "highValue": 44.0,
+                  "lowValue": 40.0,
+                  "name": "Light Blue"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 1.0,
+                      "g": 0.0,
+                      "r": 1.0
+                    }
+                  ],
+                  "highValue": 49.0,
+                  "lowValue": 45.0,
+                  "name": "Magenta"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 1.0,
+                      "g": 1.0,
+                      "r": 0.0
+                    }
+                  ],
+                  "highValue": 54.0,
+                  "lowValue": 50.0,
+                  "name": "Cyan"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.0,
+                      "g": 0.3764705882352941,
+                      "r": 1.0
+                    }
+                  ],
+                  "highValue": 59.0,
+                  "lowValue": 55.0,
+                  "name": "Orange"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.6274509803921569,
+                      "g": 0.0,
+                      "r": 0.0
+                    }
+                  ],
+                  "highValue": 64.0,
+                  "lowValue": 60.0,
+                  "name": "UV"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0.5019607843137255,
+                      "g": 0.0,
+                      "r": 0.5019607843137255
+                    }
+                  ],
+                  "highValue": 69.0,
+                  "lowValue": 65.0,
+                  "name": "Dark Magenta"
+                }
+              ]
+            },
+            "name": "Color Wheel",
+            "type": "COLOR_WHEEL"
+          },
+          "type": "COLOR_WHEEL"
+        },
+        {
+          "channel_offset": 6,
+          "detail_kind": "gobo",
+          "name": "Gobo Wheel",
+          "rich_keys": [
+            "goboSetting"
+          ],
+          "slot_count": 14,
+          "source_attribute": {
+            "goboSetting": {
+              "steps": [
+                {
+                  "highValue": 9.0,
+                  "lowValue": 0.0,
+                  "name": "G01"
+                },
+                {
+                  "highValue": 19.0,
+                  "lowValue": 10.0,
+                  "name": "G02"
+                },
+                {
+                  "highValue": 29.0,
+                  "lowValue": 20.0,
+                  "name": "G03"
+                },
+                {
+                  "highValue": 39.0,
+                  "lowValue": 30.0,
+                  "name": "G04"
+                },
+                {
+                  "highValue": 49.0,
+                  "lowValue": 40.0,
+                  "name": "G05"
+                },
+                {
+                  "highValue": 59.0,
+                  "lowValue": 50.0,
+                  "name": "G06"
+                },
+                {
+                  "highValue": 69.0,
+                  "lowValue": 60.0,
+                  "name": "G07"
+                },
+                {
+                  "highValue": 79.0,
+                  "lowValue": 70.0,
+                  "name": "G08"
+                },
+                {
+                  "highValue": 89.0,
+                  "lowValue": 80.0,
+                  "name": "G09"
+                },
+                {
+                  "highValue": 99.0,
+                  "lowValue": 90.0,
+                  "name": "Legend 330SR Spot, W2/G8"
+                },
+                {
+                  "highValue": 109.0,
+                  "lowValue": 100.0,
+                  "name": "G11"
+                },
+                {
+                  "highValue": 119.0,
+                  "lowValue": 110.0,
+                  "name": "G12"
+                },
+                {
+                  "highValue": 129.0,
+                  "lowValue": 120.0,
+                  "name": "G13"
+                },
+                {
+                  "highValue": 139.0,
+                  "lowValue": 130.0,
+                  "name": "G14"
+                }
+              ]
+            },
+            "name": "Gobo Wheel",
+            "type": "GOBO"
+          },
+          "type": "GOBO"
+        },
+        {
+          "channel_offset": 7,
+          "detail_kind": null,
+          "name": "Gobo Rotation",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Gobo Rotation",
+            "type": "ROTATION"
+          },
+          "type": "ROTATION"
+        }
+      ],
+      "name": "Standard"
+    }
+  ],
+  "name": "Obsession",
+  "source_file": "chauvet-dj-obsession.json",
+  "type": "FIXTURE_PROFILE",
+  "version": 1
+}

@@ -1,0 +1,498 @@
+{
+  "fixture_profile_id": "b5b19e34-422f-4f27-9a61-3550b3158f19",
+  "manufacturer": "Chauvet DJ",
+  "modes": [
+    {
+      "channel_count": 10,
+      "channels": [
+        {
+          "channel_offset": 1,
+          "detail_kind": "static",
+          "name": "Control mode",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Control mode",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 2,
+          "detail_kind": "gobo",
+          "name": "Pattern",
+          "rich_keys": [
+            "goboSetting"
+          ],
+          "slot_count": 32,
+          "source_attribute": {
+            "goboSetting": {
+              "steps": [
+                {
+                  "enabled": true,
+                  "name": "Pattern 1 ",
+                  "value": 0
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 2",
+                  "value": 10
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 3",
+                  "value": 20
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 4",
+                  "value": 26
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 5",
+                  "value": 38
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 6",
+                  "value": 40
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 7",
+                  "value": 47
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 8",
+                  "value": 58
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 9",
+                  "value": 69
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 10",
+                  "value": 77
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 11",
+                  "value": 78
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 12",
+                  "value": 88
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 13",
+                  "value": 100
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 14",
+                  "value": 105
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 15",
+                  "value": 117
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 16",
+                  "value": 122
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 17",
+                  "value": 129
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 18",
+                  "value": 139
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 19",
+                  "value": 149
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 20",
+                  "value": 154
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 21",
+                  "value": 154
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 22",
+                  "value": 170
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 23",
+                  "value": 180
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 24",
+                  "value": 188
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 25",
+                  "value": 196
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 26",
+                  "value": 193
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 27",
+                  "value": 210
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 28",
+                  "value": 220
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 29",
+                  "value": 228
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 30",
+                  "value": 236
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 31",
+                  "value": 245
+                },
+                {
+                  "enabled": true,
+                  "name": "Pattern 32",
+                  "value": 250
+                }
+              ]
+            },
+            "name": "Pattern",
+            "type": "GOBO"
+          },
+          "type": "GOBO"
+        },
+        {
+          "channel_offset": 3,
+          "detail_kind": "color_wheel",
+          "name": "Color",
+          "rich_keys": [
+            "colorWheelSetting"
+          ],
+          "slot_count": 10,
+          "source_attribute": {
+            "colorWheelSetting": {
+              "allowSplitColors": true,
+              "colors": [
+                {
+                  "color": [
+                    {
+                      "b": 0,
+                      "g": 0,
+                      "r": 0
+                    }
+                  ],
+                  "name": "Black",
+                  "value": 0
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0,
+                      "g": 0,
+                      "r": 1
+                    }
+                  ],
+                  "name": "Red",
+                  "value": 35
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0,
+                      "g": 1,
+                      "r": 0
+                    }
+                  ],
+                  "name": "Green",
+                  "value": 50
+                },
+                {
+                  "color": [
+                    {
+                      "b": 1,
+                      "g": 0,
+                      "r": 0
+                    }
+                  ],
+                  "name": "Blue",
+                  "value": 77
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0,
+                      "g": 1,
+                      "r": 1
+                    }
+                  ],
+                  "name": "Yellow",
+                  "value": 85
+                },
+                {
+                  "color": [
+                    {
+                      "b": 1,
+                      "g": 0,
+                      "r": 1
+                    }
+                  ],
+                  "name": "Magenta",
+                  "value": 100
+                },
+                {
+                  "color": [
+                    {
+                      "b": 1,
+                      "g": 1,
+                      "r": 0
+                    }
+                  ],
+                  "name": "Cyan",
+                  "value": 115
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0,
+                      "g": 0,
+                      "r": 1
+                    },
+                    {
+                      "b": 0,
+                      "g": 1,
+                      "r": 0
+                    }
+                  ],
+                  "highValue": 149,
+                  "lowValue": 127,
+                  "name": "Green + red",
+                  "value": 160
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0,
+                      "g": 1,
+                      "r": 0
+                    },
+                    {
+                      "b": 1,
+                      "g": 0,
+                      "r": 0
+                    }
+                  ],
+                  "highValue": 174,
+                  "lowValue": 150,
+                  "name": "green + blue"
+                },
+                {
+                  "color": [
+                    {
+                      "b": 0,
+                      "g": 0,
+                      "r": 1
+                    },
+                    {
+                      "b": 1,
+                      "g": 0,
+                      "r": 0
+                    }
+                  ],
+                  "highValue": 199,
+                  "lowValue": 175,
+                  "name": "red + blue"
+                }
+              ]
+            },
+            "name": "Color",
+            "type": "COLOR_WHEEL"
+          },
+          "type": "COLOR_WHEEL"
+        },
+        {
+          "channel_offset": 4,
+          "detail_kind": null,
+          "name": "Strobe",
+          "rich_keys": [],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Strobe",
+            "type": "SHUTTER"
+          },
+          "type": "SHUTTER"
+        },
+        {
+          "channel_offset": 5,
+          "detail_kind": "range",
+          "name": "Zoom",
+          "rich_keys": [
+            "invert",
+            "range",
+            "smoothing"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "invert": false,
+            "name": "Zoom",
+            "range": {
+              "highValue": 0.498039,
+              "lowValue": 0
+            },
+            "smoothing": 0,
+            "type": "ZOOM"
+          },
+          "type": "ZOOM"
+        },
+        {
+          "channel_offset": 6,
+          "detail_kind": "movement",
+          "name": "Pan",
+          "rich_keys": [
+            "invert",
+            "panSetting",
+            "range",
+            "smoothing"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "invert": false,
+            "name": "Pan",
+            "panSetting": {
+              "offset": 0.006,
+              "width": 0.493
+            },
+            "range": {
+              "highValue": 0.498039,
+              "lowValue": 0
+            },
+            "smoothing": 0,
+            "type": "PAN"
+          },
+          "type": "PAN"
+        },
+        {
+          "channel_offset": 7,
+          "detail_kind": "movement",
+          "name": "Tilt",
+          "rich_keys": [
+            "invert",
+            "range",
+            "smoothing",
+            "tiltSetting"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "invert": false,
+            "name": "Tilt",
+            "range": {
+              "highValue": 0.498039,
+              "lowValue": 0
+            },
+            "smoothing": 0,
+            "tiltSetting": {
+              "offset": -0.003,
+              "width": 0.492
+            },
+            "type": "TILT"
+          },
+          "type": "TILT"
+        },
+        {
+          "channel_offset": 8,
+          "detail_kind": "static",
+          "name": "X Axis Rolling",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "X Axis Rolling",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 9,
+          "detail_kind": "static",
+          "name": "Y Axis Rolling",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Y Axis Rolling",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        },
+        {
+          "channel_offset": 10,
+          "detail_kind": "static",
+          "name": "Z Axis Rolling",
+          "rich_keys": [
+            "staticValue"
+          ],
+          "slot_count": 0,
+          "source_attribute": {
+            "name": "Z Axis Rolling",
+            "staticValue": {
+              "value": 0
+            },
+            "type": "STATIC"
+          },
+          "type": "STATIC"
+        }
+      ],
+      "name": "Standard Mode"
+    }
+  ],
+  "name": "Scorpion Dual RGB",
+  "source_file": "chauvet-dj-scorpion-dual-rgb.json",
+  "type": "FIXTURE_PROFILE",
+  "version": 1
+}

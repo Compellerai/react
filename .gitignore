@@ -1,0 +1,36 @@
+# Secrets, signing identity, license key (NEVER commit) — see .env.example
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+/target/
+/tools/*/target/
+
+# Proprietary NDI SDK — install locally, do not redistribute (see README)
+/ndi-sdk/
+
+# Model weights — downloaded/exported locally
+/models/*.onnx
+/llm/
+
+# Optional locally-built ffmpeg with NDI support
+/ffmpeg/
+
+# Large local media
+/public/*.mp4
+/public/videos/
+
+# Internal working notes
+/todo*.md
+
+# Runtime logs
+stream-smoke-events.jsonl
+
+# macOS / editors / tooling
+.DS_Store
+.idea/
+.vscode/
+__pycache__/
+*.py[cod]
+node_modules/

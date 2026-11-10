@@ -1,0 +1,270 @@
+{
+  "staticWarning": false,
+  "fixtureProfile": {
+    "id": "36f69c64-f994-4a56-b5ee-2678540f62c4",
+    "name": "LED Beam 8x12W RGBW",
+    "manufacturer": "Shehds",
+    "category": "Arrays",
+    "partNo": "SHE-BMH0812D",
+    "metadata": {
+      "atlaId": "36f69c64-f994-4a56-b5ee-2678540f62c4",
+      "parserVersion": "0.1.0",
+      "source": "ATLABASE"
+    },
+    "mode": [
+      {
+        "id": "a672eccf-6905-401f-af3d-4fcd2f0237e7",
+        "name": "38 Channel",
+        "attribute": [
+          {
+            "name": "Tilt",
+            "type": "TILT",
+            "range": {
+              "lowValue": 0.0,
+              "highValue": 1.0
+            },
+            "tiltSetting": {
+              "width": 0.5,
+              "offset": 0.0
+            }
+          },
+          {
+            "name": "Tilt Speed",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Built-In Effects",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Built-In Effects Speed",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Master Dimmer",
+            "type": "MASTER_DIMMER",
+            "range": {
+              "lowValue": 0.0,
+              "highValue": 1.0
+            },
+            "staticValue": {
+              "value": 255
+            }
+          },
+          {
+            "name": "Strobe",
+            "type": "SHUTTER",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Red 1",
+            "type": "RED"
+          },
+          {
+            "name": "Green 1",
+            "type": "GREEN"
+          },
+          {
+            "name": "Blue 1",
+            "type": "BLUE"
+          },
+          {
+            "name": "White 1",
+            "type": "WARM_WHITE"
+          },
+          {
+            "name": "Red 2",
+            "type": "RED"
+          },
+          {
+            "name": "Green 2",
+            "type": "GREEN"
+          },
+          {
+            "name": "Blue 2",
+            "type": "BLUE"
+          },
+          {
+            "name": "White 2",
+            "type": "WARM_WHITE"
+          },
+          {
+            "name": "Red 3",
+            "type": "RED"
+          },
+          {
+            "name": "Green 3",
+            "type": "GREEN"
+          },
+          {
+            "name": "Blue 3",
+            "type": "BLUE"
+          },
+          {
+            "name": "White 3",
+            "type": "WARM_WHITE"
+          },
+          {
+            "name": "Red 4",
+            "type": "RED"
+          },
+          {
+            "name": "Green 4",
+            "type": "GREEN"
+          },
+          {
+            "name": "Blue 4",
+            "type": "BLUE"
+          },
+          {
+            "name": "White 4",
+            "type": "WARM_WHITE"
+          },
+          {
+            "name": "Red 5",
+            "type": "RED"
+          },
+          {
+            "name": "Green 5",
+            "type": "GREEN"
+          },
+          {
+            "name": "Blue 5",
+            "type": "BLUE"
+          },
+          {
+            "name": "White 5",
+            "type": "WARM_WHITE"
+          },
+          {
+            "name": "Red 6",
+            "type": "RED"
+          },
+          {
+            "name": "Green 6",
+            "type": "GREEN"
+          },
+          {
+            "name": "Blue 6",
+            "type": "BLUE"
+          },
+          {
+            "name": "White 6",
+            "type": "WARM_WHITE"
+          },
+          {
+            "name": "Red 7",
+            "type": "RED"
+          },
+          {
+            "name": "Green 7",
+            "type": "GREEN"
+          },
+          {
+            "name": "Blue 7",
+            "type": "BLUE"
+          },
+          {
+            "name": "White 7",
+            "type": "WARM_WHITE"
+          },
+          {
+            "name": "Red 8",
+            "type": "RED"
+          },
+          {
+            "name": "Green 8",
+            "type": "GREEN"
+          },
+          {
+            "name": "Blue 8",
+            "type": "BLUE"
+          },
+          {
+            "name": "White 8",
+            "type": "WARM_WHITE"
+          }
+        ]
+      },
+      {
+        "id": "19e083cb-292f-4bd0-8b8b-6ecbe4ed741b",
+        "name": "9 Channel",
+        "attribute": [
+          {
+            "name": "Tilt",
+            "type": "TILT",
+            "range": {
+              "lowValue": 0.0,
+              "highValue": 1.0
+            },
+            "tiltSetting": {
+              "width": 0.5,
+              "offset": 0.0
+            }
+          },
+          {
+            "name": "Tilt Speed",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Built-In Effects",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Built-In Effects Speed",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Master Dimmer",
+            "type": "MASTER_DIMMER",
+            "range": {
+              "lowValue": 0.0,
+              "highValue": 1.0
+            },
+            "staticValue": {
+              "value": 255
+            }
+          },
+          {
+            "name": "Red",
+            "type": "RED"
+          },
+          {
+            "name": "Green",
+            "type": "GREEN"
+          },
+          {
+            "name": "Blue",
+            "type": "BLUE"
+          },
+          {
+            "name": "White",
+            "type": "WARM_WHITE"
+          }
+        ]
+      }
+    ]
+  },
+  "version": 1,
+  "type": "FIXTURE_PROFILE"
+}

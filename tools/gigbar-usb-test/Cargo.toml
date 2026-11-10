@@ -1,0 +1,12 @@
+[package]
+name = "gigbar-usb-test"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Standalone Open-DMX USB bench test for the Chauvet DJ GigBAR Move — fires every section so the wiring/addressing can be verified against real hardware. Independent of the REACT app (no SaaS, no login)."
+
+# Mirrors REACT's USB DMX transport: the same `open_dmx` crate REACT's
+# `src/dmx/usb.rs` uses for FTDI 'Open DMX USB' (FT232RL bit-bang) cables.
+[dependencies]
+open_dmx = "1.1"
+ctrlc = "3"

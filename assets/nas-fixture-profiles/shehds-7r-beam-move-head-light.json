@@ -1,0 +1,853 @@
+{
+  "staticWarning": false,
+  "fixtureProfile": {
+    "id": "01cc2583-e793-4efc-8b49-448ac7d4ab21",
+    "name": "7R Beam Move Head Light",
+    "manufacturer": "Shehds",
+    "category": "Moving Heads",
+    "partNo": "SHE-BB230W7R",
+    "metadata": {
+      "atlaId": "01cc2583-e793-4efc-8b49-448ac7d4ab21",
+      "parserVersion": "0.1.0",
+      "source": "ATLABASE"
+    },
+    "mode": [
+      {
+        "id": "2aaaaf4e-5ce0-4fe0-b491-c453ebe9d9e4",
+        "name": "16 Channel",
+        "attribute": [
+          {
+            "name": "Color",
+            "type": "COLOR_WHEEL",
+            "colorWheelSetting": {
+              "colors": [
+                {
+                  "name": "Open",
+                  "color": [
+                    {
+                      "r": 0.8901960784313725,
+                      "g": 0.9058823529411765,
+                      "b": 1.0
+                    }
+                  ],
+                  "lowValue": 0.0,
+                  "highValue": 4.0
+                },
+                {
+                  "name": "Dark Red",
+                  "color": [
+                    {
+                      "r": 0.6509803921568628,
+                      "g": 0.0,
+                      "b": 0.0
+                    }
+                  ],
+                  "lowValue": 9.0,
+                  "highValue": 12.0
+                },
+                {
+                  "name": "Dark Green",
+                  "color": [
+                    {
+                      "r": 0.24705882352941178,
+                      "g": 0.396078431372549,
+                      "b": 0.24705882352941178
+                    }
+                  ],
+                  "lowValue": 18.0,
+                  "highValue": 21.0
+                },
+                {
+                  "name": "Blue",
+                  "color": [
+                    {
+                      "r": 0.0,
+                      "g": 0.0,
+                      "b": 1.0
+                    }
+                  ],
+                  "lowValue": 26.0,
+                  "highValue": 29.0
+                },
+                {
+                  "name": "Light Orange",
+                  "color": [
+                    {
+                      "r": 1.0,
+                      "g": 0.5333333333333333,
+                      "b": 0.25098039215686274
+                    }
+                  ],
+                  "lowValue": 35.0,
+                  "highValue": 38.0
+                },
+                {
+                  "name": "Yellow",
+                  "color": [
+                    {
+                      "r": 1.0,
+                      "g": 1.0,
+                      "b": 0.0
+                    }
+                  ],
+                  "lowValue": 43.0,
+                  "highValue": 46.0
+                },
+                {
+                  "name": "Dark Lavender",
+                  "color": [
+                    {
+                      "r": 0.3843137254901961,
+                      "g": 0.19215686274509805,
+                      "b": 0.5411764705882353
+                    }
+                  ],
+                  "lowValue": 52.0,
+                  "highValue": 55.0
+                },
+                {
+                  "name": "Dark Orange",
+                  "color": [
+                    {
+                      "r": 0.9490196078431372,
+                      "g": 0.3568627450980392,
+                      "b": 0.0
+                    }
+                  ],
+                  "lowValue": 60.0,
+                  "highValue": 63.0
+                },
+                {
+                  "name": "Dark Blue",
+                  "color": [
+                    {
+                      "r": 0.0,
+                      "g": 0.0,
+                      "b": 0.7176470588235294
+                    }
+                  ],
+                  "lowValue": 69.0,
+                  "highValue": 72.0
+                },
+                {
+                  "name": "Purple",
+                  "color": [
+                    {
+                      "r": 0.5843137254901961,
+                      "g": 0.0,
+                      "b": 0.5254901960784314
+                    }
+                  ],
+                  "lowValue": 77.0,
+                  "highValue": 81.0
+                },
+                {
+                  "name": "Green",
+                  "color": [
+                    {
+                      "r": 0.0,
+                      "g": 0.5411764705882353,
+                      "b": 0.0
+                    }
+                  ],
+                  "lowValue": 86.0,
+                  "highValue": 89.0
+                },
+                {
+                  "name": "Orange",
+                  "color": [
+                    {
+                      "r": 1.0,
+                      "g": 0.3764705882352941,
+                      "b": 0.0
+                    }
+                  ],
+                  "lowValue": 94.0,
+                  "highValue": 98.0
+                },
+                {
+                  "name": "Light Yellow",
+                  "color": [
+                    {
+                      "r": 1.0,
+                      "g": 1.0,
+                      "b": 0.5490196078431373
+                    }
+                  ],
+                  "lowValue": 103.0,
+                  "highValue": 106.0
+                },
+                {
+                  "name": "Pink",
+                  "color": [
+                    {
+                      "r": 1.0,
+                      "g": 0.7529411764705882,
+                      "b": 0.796078431372549
+                    }
+                  ],
+                  "lowValue": 111.0,
+                  "highValue": 115.0
+                },
+                {
+                  "name": "CTB",
+                  "color": [
+                    {
+                      "r": 0.43529411764705883,
+                      "g": 0.43529411764705883,
+                      "b": 1.0
+                    }
+                  ],
+                  "lowValue": 120.0,
+                  "highValue": 123.0
+                }
+              ]
+            }
+          },
+          {
+            "name": "Strobe",
+            "type": "SHUTTER",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Dimming",
+            "type": "DIMMER",
+            "range": {
+              "lowValue": 0.0,
+              "highValue": 1.0
+            }
+          },
+          {
+            "name": "Gobo",
+            "type": "GOBO",
+            "goboSetting": {
+              "steps": [
+                {
+                  "name": "Open",
+                  "lowValue": 0.0,
+                  "highValue": 3.0
+                },
+                {
+                  "name": "Beam 1",
+                  "lowValue": 4.0,
+                  "highValue": 7.0
+                },
+                {
+                  "name": "Beam 2",
+                  "lowValue": 8.0,
+                  "highValue": 11.0
+                },
+                {
+                  "name": "Beam 3",
+                  "lowValue": 12.0,
+                  "highValue": 15.0
+                },
+                {
+                  "name": "Beam 4",
+                  "lowValue": 16.0,
+                  "highValue": 19.0
+                },
+                {
+                  "name": "Beam 5",
+                  "lowValue": 20.0,
+                  "highValue": 23.0
+                },
+                {
+                  "name": "Beam 6",
+                  "lowValue": 24.0,
+                  "highValue": 27.0
+                },
+                {
+                  "name": "G08",
+                  "lowValue": 28.0,
+                  "highValue": 31.0
+                },
+                {
+                  "name": "G09",
+                  "lowValue": 32.0,
+                  "highValue": 35.0
+                },
+                {
+                  "name": "G10",
+                  "lowValue": 36.0,
+                  "highValue": 39.0
+                },
+                {
+                  "name": "G11",
+                  "lowValue": 40.0,
+                  "highValue": 43.0
+                },
+                {
+                  "name": "G12",
+                  "lowValue": 44.0,
+                  "highValue": 47.0
+                },
+                {
+                  "name": "G13",
+                  "lowValue": 48.0,
+                  "highValue": 51.0
+                },
+                {
+                  "name": "G14",
+                  "lowValue": 52.0,
+                  "highValue": 55.0
+                },
+                {
+                  "name": "G15",
+                  "lowValue": 56.0,
+                  "highValue": 59.0
+                },
+                {
+                  "name": "G16",
+                  "lowValue": 60.0,
+                  "highValue": 63.0
+                },
+                {
+                  "name": "G17",
+                  "lowValue": 64.0,
+                  "highValue": 67.0
+                },
+                {
+                  "name": "G18",
+                  "lowValue": 68.0,
+                  "highValue": 71.0
+                }
+              ]
+            }
+          },
+          {
+            "name": "Prism",
+            "type": "PRISM",
+            "prismSetting": {
+              "steps": [
+                {
+                  "name": "Open",
+                  "lowValue": 0.0,
+                  "highValue": 127.0
+                },
+                {
+                  "name": "24-Facet 8+16 Circular Prism",
+                  "lowValue": 128.0,
+                  "highValue": 255.0
+                }
+              ]
+            }
+          },
+          {
+            "name": "Rotate Prism",
+            "type": "ROTATION"
+          },
+          {
+            "name": "None",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Frost",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Focus",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 127
+            }
+          },
+          {
+            "name": "Pan",
+            "type": "PAN",
+            "range": {
+              "lowValue": 0.0,
+              "highValue": 1.0
+            },
+            "panSetting": {
+              "width": 0.25,
+              "offset": 0.0
+            }
+          },
+          {
+            "name": "Pan Fine",
+            "type": "PAN_FINE"
+          },
+          {
+            "name": "Tilt",
+            "type": "TILT",
+            "range": {
+              "lowValue": 0.0,
+              "highValue": 1.0
+            },
+            "tiltSetting": {
+              "width": 0.5,
+              "offset": 0.0
+            }
+          },
+          {
+            "name": "Tilt Fine",
+            "type": "TILT_FINE"
+          },
+          {
+            "name": "None",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Reset",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Lamp",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "beff912e-0d27-4af0-922a-bc088fd9caa4",
+        "name": "20 Channel",
+        "attribute": [
+          {
+            "name": "Color",
+            "type": "COLOR_WHEEL",
+            "colorWheelSetting": {
+              "colors": [
+                {
+                  "name": "Open",
+                  "color": [
+                    {
+                      "r": 0.8901960784313725,
+                      "g": 0.9058823529411765,
+                      "b": 1.0
+                    }
+                  ],
+                  "lowValue": 0.0,
+                  "highValue": 4.0
+                },
+                {
+                  "name": "Dark Red",
+                  "color": [
+                    {
+                      "r": 0.6509803921568628,
+                      "g": 0.0,
+                      "b": 0.0
+                    }
+                  ],
+                  "lowValue": 9.0,
+                  "highValue": 12.0
+                },
+                {
+                  "name": "Dark Green",
+                  "color": [
+                    {
+                      "r": 0.24705882352941178,
+                      "g": 0.396078431372549,
+                      "b": 0.24705882352941178
+                    }
+                  ],
+                  "lowValue": 18.0,
+                  "highValue": 21.0
+                },
+                {
+                  "name": "Blue",
+                  "color": [
+                    {
+                      "r": 0.0,
+                      "g": 0.0,
+                      "b": 1.0
+                    }
+                  ],
+                  "lowValue": 26.0,
+                  "highValue": 29.0
+                },
+                {
+                  "name": "Light Orange",
+                  "color": [
+                    {
+                      "r": 1.0,
+                      "g": 0.5333333333333333,
+                      "b": 0.25098039215686274
+                    }
+                  ],
+                  "lowValue": 35.0,
+                  "highValue": 38.0
+                },
+                {
+                  "name": "Yellow",
+                  "color": [
+                    {
+                      "r": 1.0,
+                      "g": 1.0,
+                      "b": 0.0
+                    }
+                  ],
+                  "lowValue": 43.0,
+                  "highValue": 46.0
+                },
+                {
+                  "name": "Dark Lavender",
+                  "color": [
+                    {
+                      "r": 0.3843137254901961,
+                      "g": 0.19215686274509805,
+                      "b": 0.5411764705882353
+                    }
+                  ],
+                  "lowValue": 52.0,
+                  "highValue": 55.0
+                },
+                {
+                  "name": "Dark Orange",
+                  "color": [
+                    {
+                      "r": 0.9490196078431372,
+                      "g": 0.3568627450980392,
+                      "b": 0.0
+                    }
+                  ],
+                  "lowValue": 60.0,
+                  "highValue": 63.0
+                },
+                {
+                  "name": "Dark Blue",
+                  "color": [
+                    {
+                      "r": 0.0,
+                      "g": 0.0,
+                      "b": 0.7176470588235294
+                    }
+                  ],
+                  "lowValue": 69.0,
+                  "highValue": 72.0
+                },
+                {
+                  "name": "Purple",
+                  "color": [
+                    {
+                      "r": 0.5843137254901961,
+                      "g": 0.0,
+                      "b": 0.5254901960784314
+                    }
+                  ],
+                  "lowValue": 77.0,
+                  "highValue": 81.0
+                },
+                {
+                  "name": "Green",
+                  "color": [
+                    {
+                      "r": 0.0,
+                      "g": 0.5411764705882353,
+                      "b": 0.0
+                    }
+                  ],
+                  "lowValue": 86.0,
+                  "highValue": 89.0
+                },
+                {
+                  "name": "Orange",
+                  "color": [
+                    {
+                      "r": 1.0,
+                      "g": 0.3764705882352941,
+                      "b": 0.0
+                    }
+                  ],
+                  "lowValue": 94.0,
+                  "highValue": 98.0
+                },
+                {
+                  "name": "Light Yellow",
+                  "color": [
+                    {
+                      "r": 1.0,
+                      "g": 1.0,
+                      "b": 0.5490196078431373
+                    }
+                  ],
+                  "lowValue": 103.0,
+                  "highValue": 106.0
+                },
+                {
+                  "name": "Pink",
+                  "color": [
+                    {
+                      "r": 1.0,
+                      "g": 0.7529411764705882,
+                      "b": 0.796078431372549
+                    }
+                  ],
+                  "lowValue": 111.0,
+                  "highValue": 115.0
+                },
+                {
+                  "name": "CTB",
+                  "color": [
+                    {
+                      "r": 0.43529411764705883,
+                      "g": 0.43529411764705883,
+                      "b": 1.0
+                    }
+                  ],
+                  "lowValue": 120.0,
+                  "highValue": 123.0
+                }
+              ]
+            }
+          },
+          {
+            "name": "Strobe",
+            "type": "SHUTTER",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Dimming",
+            "type": "DIMMER",
+            "range": {
+              "lowValue": 0.0,
+              "highValue": 1.0
+            }
+          },
+          {
+            "name": "Gobo",
+            "type": "GOBO",
+            "goboSetting": {
+              "steps": [
+                {
+                  "name": "Open",
+                  "lowValue": 0.0,
+                  "highValue": 3.0
+                },
+                {
+                  "name": "Beam 1",
+                  "lowValue": 4.0,
+                  "highValue": 7.0
+                },
+                {
+                  "name": "Beam 2",
+                  "lowValue": 8.0,
+                  "highValue": 11.0
+                },
+                {
+                  "name": "Beam 3",
+                  "lowValue": 12.0,
+                  "highValue": 15.0
+                },
+                {
+                  "name": "Beam 4",
+                  "lowValue": 16.0,
+                  "highValue": 19.0
+                },
+                {
+                  "name": "Beam 5",
+                  "lowValue": 20.0,
+                  "highValue": 23.0
+                },
+                {
+                  "name": "Beam 6",
+                  "lowValue": 24.0,
+                  "highValue": 27.0
+                },
+                {
+                  "name": "G08",
+                  "lowValue": 28.0,
+                  "highValue": 31.0
+                },
+                {
+                  "name": "G09",
+                  "lowValue": 32.0,
+                  "highValue": 35.0
+                },
+                {
+                  "name": "G10",
+                  "lowValue": 36.0,
+                  "highValue": 39.0
+                },
+                {
+                  "name": "G11",
+                  "lowValue": 40.0,
+                  "highValue": 43.0
+                },
+                {
+                  "name": "G12",
+                  "lowValue": 44.0,
+                  "highValue": 47.0
+                },
+                {
+                  "name": "G13",
+                  "lowValue": 48.0,
+                  "highValue": 51.0
+                },
+                {
+                  "name": "G14",
+                  "lowValue": 52.0,
+                  "highValue": 55.0
+                },
+                {
+                  "name": "G15",
+                  "lowValue": 56.0,
+                  "highValue": 59.0
+                },
+                {
+                  "name": "G16",
+                  "lowValue": 60.0,
+                  "highValue": 63.0
+                },
+                {
+                  "name": "G17",
+                  "lowValue": 64.0,
+                  "highValue": 67.0
+                },
+                {
+                  "name": "G18",
+                  "lowValue": 68.0,
+                  "highValue": 71.0
+                }
+              ]
+            }
+          },
+          {
+            "name": "Prism",
+            "type": "PRISM",
+            "prismSetting": {
+              "steps": [
+                {
+                  "name": "Open",
+                  "lowValue": 0.0,
+                  "highValue": 127.0
+                },
+                {
+                  "name": "24-Facet 8+16 Circular Prism",
+                  "lowValue": 128.0,
+                  "highValue": 255.0
+                }
+              ]
+            }
+          },
+          {
+            "name": "Rotate Prism",
+            "type": "ROTATION"
+          },
+          {
+            "name": "None",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Frost",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Focus",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 127
+            }
+          },
+          {
+            "name": "Pan",
+            "type": "PAN",
+            "range": {
+              "lowValue": 0.0,
+              "highValue": 1.0
+            },
+            "panSetting": {
+              "width": 0.25,
+              "offset": 0.0
+            }
+          },
+          {
+            "name": "Pan Fine",
+            "type": "PAN_FINE"
+          },
+          {
+            "name": "Tilt",
+            "type": "TILT",
+            "range": {
+              "lowValue": 0.0,
+              "highValue": 1.0
+            },
+            "tiltSetting": {
+              "width": 0.5,
+              "offset": 0.0
+            }
+          },
+          {
+            "name": "Tilt Fine",
+            "type": "TILT_FINE"
+          },
+          {
+            "name": "None",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Reset",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Lamp",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Pan/Tilt Speed",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Color Speed",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Dimmer-Prism Speed",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          },
+          {
+            "name": "Gobo Speed",
+            "type": "STATIC",
+            "staticValue": {
+              "value": 0
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "version": 1,
+  "type": "FIXTURE_PROFILE"
+}

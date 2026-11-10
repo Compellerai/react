@@ -1,0 +1,30 @@
+[package]
+edition = "2021"
+rust-version = "1.65"
+name = "projectm-sys"
+version = "1.2.3"
+authors = [
+    "AnomieVision <anomievision@gmail.com.com>",
+    "Mischa Spiegelmock <me@mish.dev>",
+]
+build = "build.rs"
+links = "projectm"
+description = "Bindings for ProjectM (local fork with libprojectM 4.1.6)"
+license = "LGPL-3.0-or-later"
+repository = "https://github.com/projectM-visualizer/projectm-rs"
+
+[lib]
+name = "projectm_sys"
+path = "src/lib.rs"
+
+[dependencies]
+
+[build-dependencies]
+bindgen = "0.70.1"
+cmake = "0.1.50"
+lazy_static = "1.4.0"
+
+[features]
+default = ["playlist"]
+playlist = []
+static = []

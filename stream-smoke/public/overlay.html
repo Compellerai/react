@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Compeller REACT Stream Smoke Overlay</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; width: 100vw; height: 100vh; overflow: hidden; background: transparent; color: #f6fbff; }
+    #stack { position: fixed; left: 32px; bottom: 32px; display: flex; flex-direction: column; gap: 12px; width: min(720px, calc(100vw - 64px)); }
+    .card { border: 1px solid rgba(132, 219, 255, 0.42); background: linear-gradient(135deg, rgba(5, 12, 24, 0.86), rgba(30, 55, 90, 0.72)); box-shadow: 0 12px 42px rgba(0, 0, 0, 0.45); border-radius: 18px; padding: 14px 16px; backdrop-filter: blur(8px); animation: rise 220ms ease-out; }
+    .meta { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.12em; color: #8bdcff; }
+    .source { color: #ffffff; font-weight: 800; }
+    .kind { color: #ffce6b; }
+    .msg { font-size: 24px; line-height: 1.22; text-shadow: 0 2px 18px rgba(0, 0, 0, 0.65); overflow-wrap: anywhere; }
+    .chat .kind { color: #9dffba; }
+    .error .kind { color: #ff8b8b; }
+    @keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body>
+  <main id="stack" aria-live="polite"></main>
+  <script>
+    const stack = document.getElementById('stack');
+    const maxCards = Number(new URLSearchParams(location.search).get('max') || 5);
+    const ttlMs = Number(new URLSearchParams(location.search).get('ttl') || 22000);
+
+    function addCard(event) {
+      const card = document.createElement('section');
+      card.className = `card ${event.kind || 'status'}`;
+      card.innerHTML = `
+        <div class="meta"><span class="source"></span><span class="kind"></span><span class="time"></span></div>
+        <div class="msg"></div>
+      `;
+      card.querySelector('.source').textContent = event.user || event.source || 'Linus';
+      card.querySelector('.kind').textContent = event.kind || 'status';
+      card.querySelector('.time').textContent = new Date(event.ts || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      card.querySelector('.msg').textContent = event.msg || '';
+      stack.appendChild(card);
+      while (stack.children.length > maxCards) stack.firstElementChild.remove();
+      setTimeout(() => card.remove(), ttlMs);
+    }
+
+    function connect() {
+      const events = new EventSource('/events');
+      events.addEventListener('message', (message) => addCard(JSON.parse(message.data)));
+      events.onerror = () => {
+        events.close();
+        setTimeout(connect, 1500);
+      };
+    }
+    connect();
+  </script>
+</body>
+</html>

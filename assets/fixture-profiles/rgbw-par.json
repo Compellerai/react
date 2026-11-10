@@ -1,0 +1,49 @@
+{
+  "schema": "react-ofl-mvp-v1",
+  "manufacturer": "Open Fixture Library Sample",
+  "model": "RGBW PAR Wash",
+  "fixtureKind": "wash",
+  "commerce": {
+    "priceTier": "budget",
+    "streetPriceRange": "$80-$180",
+    "recommendationNotes": "Common small-venue RGBW PAR/wash fixture class."
+  },
+  "modes": [
+    {
+      "name": "5-channel RGBW dimmer",
+      "shortName": "5ch",
+      "channels": [
+        {
+          "name": "Dimmer",
+          "attribute": "Dimmer",
+          "defaultValue": 0,
+          "blackoutValue": 0
+        },
+        {
+          "name": "Red",
+          "attribute": "Red",
+          "defaultValue": 0,
+          "blackoutValue": 0
+        },
+        {
+          "name": "Green",
+          "attribute": "Green",
+          "defaultValue": 0,
+          "blackoutValue": 0
+        },
+        {
+          "name": "Blue",
+          "attribute": "Blue",
+          "defaultValue": 0,
+          "blackoutValue": 0
+        },
+        {
+          "name": "White",
+          "attribute": "White",
+          "defaultValue": 0,
+          "blackoutValue": 0
+        }
+      ]
+    }
+  ]
+}

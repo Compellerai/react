@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Allow unsigned executable memory (required for JIT/OpenGL) -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!-- Disable for now: only add back if i run into issues -  Allow loading unsigned dylibs (NDI SDK)
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    -->
+
+    <!-- com.apple.security.cs.disable-library-validation REMOVED 2026-06-08.
+         build.sh re-signs every bundled dylib (libndi + GStreamer plugins) with our
+         Developer ID Team ID, so hardened-runtime library validation accepts them by
+         the same-Team-ID rule — verified empirically (re-signed a bundle without it,
+         app loads all native libs with zero validation errors; libndi resolves only to
+         the signed Frameworks copy). Keeping library validation ON closes a dylib-
+         injection bypass of the license check. Do NOT re-add unless a genuinely
+         unsigned third-party dylib must be dlopen'd at runtime. -->
+
+    <!-- Audio input access (microphone/system audio) -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+
+    <!-- Camera access (USB webcams for Artist and Patrons) -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
+
+    <!-- Screen recording access (ScreenCaptureKit) -->
+    <key>com.apple.security.screen-capture.audio</key>
+    <true/>
+
+    <!-- Network access (NDI streaming) -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <key>com.apple.security.network.server</key>
+    <true/>
+
+    <!-- File access for presets, videos, recordings -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+    <key>com.apple.security.files.downloads.read-write</key>
+    <true/>
+</dict>
+</plist>

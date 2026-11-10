@@ -1,0 +1,43 @@
+{
+  "schema": "react-ofl-mvp-v1",
+  "manufacturer": "Open Fixture Library Sample",
+  "model": "Simple DMX Laser Macro",
+  "fixtureKind": "laser",
+  "commerce": {
+    "priceTier": "mid",
+    "streetPriceRange": "$250-$900",
+    "recommendationNotes": "Macro-controlled DMX laser class. Must stay safety/operator-gated."
+  },
+  "modes": [
+    {
+      "name": "4-channel macro",
+      "shortName": "4ch",
+      "channels": [
+        {
+          "name": "Dimmer",
+          "attribute": "Dimmer",
+          "defaultValue": 0,
+          "blackoutValue": 0
+        },
+        {
+          "name": "Laser Macro",
+          "attribute": "LaserMacro",
+          "defaultValue": 0,
+          "blackoutValue": 0
+        },
+        {
+          "name": "Strobe",
+          "attribute": "Strobe",
+          "defaultValue": 0,
+          "blackoutValue": 0
+        },
+        {
+          "name": "Color Wheel",
+          "attribute": "ColorWheel",
+          "defaultValue": 0,
+          "blackoutValue": 0
+        }
+      ]
+    }
+  ]
+}

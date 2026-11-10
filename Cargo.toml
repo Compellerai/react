@@ -1,0 +1,233 @@
+[package]
+name = "compeller-react"
+version = "1.0.0"
+description = "REACT by Compeller.ai - Audio-Reactive Visuals"
+authors = ["Compeller.ai"]
+license = "Apache-2.0"
+repository = "https://github.com/Compellerai/react"
+homepage = "https://compeller.ai"
+readme = "README.md"
+edition = "2021"
+rust-version = "1.75.0"
+publish = false  # desktop application, not a crates.io library
+
+[[bin]]
+name = "compeller-react"
+path = "src/main.rs"
+
+[dependencies]
+# GUI - eframe includes egui + native windowing + OpenGL backend
+eframe = { version = "0.29", default-features = false, features = [
+    "default_fonts",
+    "glow",           # OpenGL backend
+    "persistence",    # Save/restore window state
+] }
+egui = "0.29"
+egui_glow = "0.29"
+egui_extras = { version = "0.29", features = ["image"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# Font rendering for track announcement overlay
+ab_glyph = "0.2"
+imageproc = "0.25"
+
+# OpenGL - must match eframe's version (0.14)
+glow = "0.14"
+
+# projectM visualization (Milkdrop-style)
+projectm = "3.1"
+projectm-sys = "1.2"  # Direct FFI access for correct parameter handling
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+
+# FFT for frequency analysis
+rustfft = "6.4"
+
+# Lock-free ring buffer for real-time audio
+rtrb = "0.3"
+
+# Random number generation (for preset shuffle)
+rand = "0.8"
+
+# Cross-platform audio I/O (for input device capture)
+cpal = "0.15"
+
+# Lazy static for global state
+lazy_static = "1.4"
+
+# C library bindings
+libc = "0.2"
+
+# Safe transmutation for GPU buffer data
+bytemuck = { version = "1.24", features = ["derive"] }
+
+# File dialogs
+rfd = "0.15"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# Error handling
+anyhow = "1.0"
+
+# DMX / lighting output
+ola-rs = "0.1.0"
+# USB DMX for FTDI "Open DMX USB" dongles (FT232R bit-bang DMX512). Owns its own
+# background refresh thread + DMX break timing; we wrap it as DmxBackend::Usb.
+open_dmx = "1.1"
+
+# GLTF/GLB 3D model loading
+gltf = "1.4"
+
+# Thread-safe shared state
+parking_lot = "0.12"
+
+# Temp files (watermark logo for FFmpeg overlay during recording)
+tempfile = "3"
+
+# Database for persistent app state
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Fuzzy search for preset filtering
+fuzzy-matcher = "0.3"
+
+# Cross-platform config directories
+dirs = "5.0"
+
+# File locking for single-instance enforcement
+fs2 = "0.4"
+
+# HTTP client for video sync
+ureq = { version = "2.10", features = ["json"] }
+
+# SHA-256 checksums for upload verification + HMAC for license blob verification
+sha2 = "0.10"
+hmac = "0.12"
+
+# UDP socket options for Pro DJ Link
+socket2 = { version = "0.5", features = ["all"] }  # "all" exposes set_reuse_port (needed to co-bind UDP 20808 with Ableton Link)
+prodjlink-rs = { version = "0.2.0", features = ["serde"] }
+
+# DSP for audio analysis (band splitting, envelopes, smoothing)
+fundsp = "0.20"
+
+# Lock-free channel for meter values (audio thread → UI)
+crossbeam-channel = "0.5"
+
+# Date/time formatting for recording filenames
+chrono = "0.4"
+egui-phosphor = "0.7"
+
+# Secure memory wiping for secrets (stream keys, tokens)
+zeroize = { version = "1.8", features = ["derive"] }
+
+# MIDI controller support
+midir = "0.10"
+wmidi = "4.0"
+
+# OSC (Open Sound Control) for lighting control
+rosc = "0.10"
+
+# DTLS for Hue Entertainment API streaming (PSK-AES128-GCM-SHA256)
+openssl = { version = "0.10", features = ["vendored"] }
+
+# TLS for Hue v2 CLIP API (self-signed bridge cert, danger_accept_invalid_certs)
+native-tls = "0.2"
+openssl-sys = "0.9"
+foreign-types-shared = "0.1"
+
+# Local LLM for semantic compel matching (llama.cpp with Metal support)
+llama_cpp = "0.3"
+
+# FFmpeg - sidecar for RTMP streaming (subprocess approach like OBS/Streamlabs)
+ffmpeg-sidecar = "2.4"
+# FFmpeg bindings for muxing and encoding
+ffmpeg-next = "8.1"
+
+# GStreamer for real-time A/V muxing (industry standard)
+gstreamer = "0.24"
+gstreamer-app = "0.24"
+gstreamer-video = "0.24"
+gstreamer-audio = "0.24"
+
+# Camera tracking (optional - requires camera feature)
+nokhwa = { version = "0.10", features = ["input-native"], optional = true }
+# Exact-pinned: ort is pre-release — rc.12 broke the SessionBuilder API used in
+# camera/detector.rs. Pre-release crates break between rc's, so pin hard.
+ort = { version = "=2.0.0-rc.11", optional = true }
+ndarray = { version = "0.16", optional = true }
+
+[features]
+default = []
+dev = []  # Use the dev API host from REACT_DEV_API_HOST (set at build time)
+camera = ["nokhwa", "ort", "ndarray"]
+
+# macOS-specific dependencies
+[target.'cfg(target_os = "macos")'.dependencies]
+# ScreenCaptureKit for system audio capture
+screencapturekit = "1.5"
+core-foundation = "0.10"
+# Native window/Cocoa integration
+cocoa = "0.26"
+# OpenGL context
+core-graphics = "0.24"
+gl = "0.14"
+glutin = "0.32"
+winit = "0.29"
+raw-window-handle = "0.6"
+# Modern Objective-C bindings (aligned with eframe/winit's version)
+objc2 = "0.5"
+objc = "0.2"  # For cocoa crate compatibility
+block2 = "0.5"
+objc2-foundation = "0.2"
+# Metal for GPU compute and rendering
+metal = "0.29"
+# IOSurface for zero-copy GPU texture sharing
+io-surface = "0.16"
+# Runtime dynamic library loading for embedded NDI
+libloading = "0.8"
+# Note: grafton-ndi removed - we use libloading to load NDI at runtime
+# The NDI SDK headers are not needed since we define our own FFI types
+
+# Release profile
+[profile.release]
+opt-level = 2
+strip = true
+codegen-units = 1
+lto = "thin"
+panic = "abort"
+
+[profile.dev]
+incremental = true
+split-debuginfo = "unpacked"
+
+# Suppress warnings during development
+[lints.rust]
+deprecated = "allow"
+dead_code = "allow"
+unused_imports = "allow"
+unused_variables = "allow"
+unexpected_cfgs = "allow"  # objc crate's msg_send! macro
+non_camel_case_types = "allow"  # NDI C API naming
+
+# cargo-bundle configuration for macOS .app creation
+[package.metadata.bundle]
+name = "REACT by Compeller.ai"
+identifier = "ai.compeller.react"
+icon = ["icons/icon.icns"]
+category = "public.app-category.music"
+short_description = "REACT - Audio-Reactive Visuals"
+long_description = "REACT by Compeller.ai"
+copyright = "2026 Compeller.ai"
+osx_minimum_system_version = "12.0"
+
+# Patch url crate to avoid ICU4X bloat
+[patch.crates-io]
+url = { git = "https://github.com/servo/rust-url", tag = "v2.5.2" }
+projectm-sys = { path = "deps/projectm-sys" }

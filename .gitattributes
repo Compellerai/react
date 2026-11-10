@@ -1,0 +1,7 @@
+# Third-party code and data shipped alongside REACT. Marking it vendored keeps
+# GitHub's language statistics and diffs about REACT's own source.
+deps/**     linguist-vendored
+libs/**     linguist-vendored
+presets/**  linguist-vendored
+
+Cargo.lock  linguist-generated
