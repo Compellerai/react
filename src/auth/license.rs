@@ -1,17 +1,20 @@
 //! License blob verification and offline caching
 //!
-//! The server returns an HMAC-SHA256 signed blob containing plan limits as
-//! concrete values (render_scale, max_fps, watermark, etc.). The client
-//! verifies the signature, then uses the values directly in computations.
+//! The server returns a license blob containing plan limits as concrete
+//! values (render_scale, max_fps, watermark, etc.), signed with Ed25519. The
+//! client verifies the signature against the public key(s) below, then uses
+//! the values directly in computations.
 //!
-//! Offline grace: the blob is cached in SQLite. If the blob is less than
-//! 7 days old, it's used even without network. After 7 days without a
-//! refresh, entitlements fall back to degraded defaults.
+//! Only the server holds the private key. Nothing in this file, or anywhere
+//! in a built app, is secret, and nothing in it can be used to produce a blob
+//! this code accepts.
+//!
+//! Offline: the verified blob and its signature are cached in SQLite and
+//! re-verified on every load. See `load_cached_entitlements`.
 
 use anyhow::{anyhow, Result};
-use hmac::{Hmac, Mac};
+use ed25519_dalek::{Signature, VerifyingKey};
 use serde::Deserialize;
-use sha2::Sha256;
 use std::time::Duration;
 
 use super::Entitlements;
@@ -20,29 +23,16 @@ use crate::config;
 /// 7 days in seconds
 const OFFLINE_GRACE_SECS: i64 = 7 * 24 * 3600;
 
-// HMAC key — supplied at build time, never stored in the source tree.
-//
-// build.rs reads `REACT_LICENSE_HMAC_KEY` (hex) and writes it XOR-split
-// across `HMAC_KEY_XOR` / `HMAC_KEY_ROT`, so the plaintext never appears
-// contiguously in the binary. This is NOT crypto-grade protection — it's a
-// speed bump against casual hex-editor patching. The real protection is
-// "derivation over gating": the license values are used directly in
-// computations.
-//
-// Builds made without the variable carry an empty key and reject every
-// signed blob (see `verify_and_parse`).
-include!(concat!(env!("OUT_DIR"), "/license_key.rs"));
-
-fn hmac_key() -> Vec<u8> {
-    // black_box stops the optimizer from folding the two halves back into the
-    // plaintext key at compile time, which would put it in the binary verbatim
-    // (and did: it was readable with `strings` before this guard).
-    std::hint::black_box(HMAC_KEY_XOR)
-        .iter()
-        .zip(std::hint::black_box(HMAC_KEY_ROT).iter())
-        .map(|(a, b)| a ^ b)
-        .collect()
-}
+/// Ed25519 public keys trusted to sign license blobs (32 bytes each, hex).
+///
+/// These are public keys, not secrets. A blob is accepted if any one of them
+/// verifies it, which is what makes rotating the signing key possible: ship a
+/// build that trusts the old and the new key, then switch the server over.
+/// With no entries, every blob is rejected.
+const LICENSE_PUBLIC_KEYS: &[&str] = &[
+    // compeller.ai license signing key, 2026-11
+    "f92c554b1645b80270a61e2dcfe448f5614f5b1717d6dae04a6626c8a8a94495",
+];
 
 /// License blob payload from server
 #[derive(Debug, Deserialize)]
@@ -61,17 +51,25 @@ struct LicenseBlob {
 }
 
 /// Server response for /api/licensing/blob
+///
+/// Servers still supporting pre-Ed25519 builds also send a `signature` field
+/// (an HMAC). It is deliberately not read here: an HMAC key has to ship inside
+/// every build that checks it, so it cannot prove who signed a blob.
 #[derive(Debug, Deserialize)]
 struct LicenseBlobResponse {
-    license: String,   // base64-encoded JSON
-    signature: String, // hex HMAC-SHA256
+    license: String, // base64-encoded JSON
+    /// Hex Ed25519 signature over the `license` string.
+    #[serde(default)]
+    signature_ed25519: Option<String>,
 }
 
-/// Fetch license blob from server, verify HMAC, cache to SQLite, return Entitlements.
+/// Fetch license blob from server, verify its signature, cache to SQLite, return Entitlements.
 pub fn fetch_license_blob(access_token: &str, db: &crate::db::Database) -> Result<Entitlements> {
     let url = format!("{}/licensing/blob", config::api_base());
 
     let response = ureq::get(&url)
+        // Tells the server this build verifies Ed25519 (it logs who still doesn't).
+        .query("sig", "ed25519")
         .timeout(Duration::from_secs(15))
         .set("Authorization", &format!("Bearer {}", access_token))
         .call()
@@ -85,35 +83,32 @@ pub fn fetch_license_blob(access_token: &str, db: &crate::db::Database) -> Resul
         .into_json()
         .map_err(|e| anyhow!("Invalid license response: {}", e))?;
 
-    let entitlements = verify_and_parse(&blob_response.license, &blob_response.signature)?;
+    let signature = blob_response
+        .signature_ed25519
+        .ok_or_else(|| anyhow!("License response carries no Ed25519 signature"))?;
+
+    let entitlements = verify_and_parse(&blob_response.license, &signature)?;
 
     // Cache to SQLite for offline use
-    if let Err(e) = db.save_license_blob(&blob_response.license, &blob_response.signature) {
+    if let Err(e) = db.save_license_blob(&blob_response.license, &signature) {
         log::error!("[License] Failed to cache blob: {}", e);
     }
 
     Ok(entitlements)
 }
 
-/// Verify HMAC signature and parse blob into Entitlements.
+/// Verify the Ed25519 signature and parse the blob into Entitlements.
 fn verify_and_parse(blob_b64: &str, signature_hex: &str) -> Result<Entitlements> {
-    // Verify HMAC
-    type HmacSha256 = Hmac<Sha256>;
-    let key = hmac_key();
-    if key.is_empty() {
-        // HMAC accepts a zero-length key, so without this guard a blob signed
-        // with the empty key would verify in builds that carry no key.
-        return Err(anyhow!(
-            "License verification unavailable: built without REACT_LICENSE_HMAC_KEY"
-        ));
-    }
-    let mut mac = HmacSha256::new_from_slice(&key)
-        .map_err(|e| anyhow!("HMAC init error: {}", e))?;
-    mac.update(blob_b64.as_bytes());
+    verify_and_parse_with(blob_b64, signature_hex, LICENSE_PUBLIC_KEYS)
+}
 
-    let expected_sig = hex_decode(signature_hex)?;
-    mac.verify_slice(&expected_sig)
-        .map_err(|_| anyhow!("License signature verification failed"))?;
+/// `verify_and_parse` against an explicit set of trusted keys.
+fn verify_and_parse_with(
+    blob_b64: &str,
+    signature_hex: &str,
+    trusted_keys: &[&str],
+) -> Result<Entitlements> {
+    verify_signature(blob_b64, signature_hex, trusted_keys)?;
 
     // Decode base64 → JSON → LicenseBlob
     let json_bytes = base64_decode(blob_b64)?;
@@ -141,6 +136,41 @@ fn verify_and_parse(blob_b64: &str, signature_hex: &str) -> Result<Entitlements>
         lighting_enabled: blob.lighting_enabled,
         youtube_enabled: blob.youtube_enabled,
     })
+}
+
+/// Check that `signature_hex` is an Ed25519 signature over the bytes of
+/// `blob_b64` made by one of `trusted_keys`.
+///
+/// The signature covers the base64 text exactly as received, so nothing is
+/// decoded or parsed before it has been authenticated.
+fn verify_signature(blob_b64: &str, signature_hex: &str, trusted_keys: &[&str]) -> Result<()> {
+    // Anything that is not 64 bytes of hex fails here — including the 32-byte
+    // HMAC that older builds cached.
+    let signature = Signature::from_slice(&hex_decode(signature_hex)?)
+        .map_err(|_| anyhow!("License signature is not an Ed25519 signature"))?;
+
+    for key_hex in trusted_keys {
+        let key = match public_key(key_hex) {
+            Ok(key) => key,
+            Err(e) => {
+                log::error!("[License] Skipping unusable trusted key: {}", e);
+                continue;
+            }
+        };
+        // verify_strict also rejects weak keys and non-canonical signatures.
+        if key.verify_strict(blob_b64.as_bytes(), &signature).is_ok() {
+            return Ok(());
+        }
+    }
+
+    Err(anyhow!("License signature verification failed"))
+}
+
+fn public_key(key_hex: &str) -> Result<VerifyingKey> {
+    let bytes: [u8; 32] = hex_decode(key_hex)?
+        .try_into()
+        .map_err(|_| anyhow!("Ed25519 public key must be 32 bytes"))?;
+    VerifyingKey::from_bytes(&bytes).map_err(|e| anyhow!("Invalid Ed25519 public key: {}", e))
 }
 
 /// Load cached license blob from SQLite.
@@ -206,21 +236,29 @@ fn base64_decode(input: &str) -> Result<Vec<u8>> {
 }
 
 fn hex_decode(input: &str) -> Result<Vec<u8>> {
-    if input.len() % 2 != 0 {
+    fn nibble(byte: u8) -> Result<u8> {
+        match byte {
+            b'0'..=b'9' => Ok(byte - b'0'),
+            b'a'..=b'f' => Ok(byte - b'a' + 10),
+            b'A'..=b'F' => Ok(byte - b'A' + 10),
+            _ => Err(anyhow!("Invalid hex")),
+        }
+    }
+
+    let bytes = input.as_bytes();
+    if bytes.len() % 2 != 0 {
         return Err(anyhow!("Odd-length hex string"));
     }
-    (0..input.len())
-        .step_by(2)
-        .map(|i| {
-            u8::from_str_radix(&input[i..i + 2], 16)
-                .map_err(|e| anyhow!("Invalid hex: {}", e))
-        })
+    bytes
+        .chunks_exact(2)
+        .map(|pair| Ok((nibble(pair[0])? << 4) | nibble(pair[1])?))
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
 
     fn base64_encode(input: &[u8]) -> String {
         const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -236,49 +274,196 @@ mod tests {
         out
     }
 
-    /// A well-formed, unexpired license blob (base64 JSON).
-    fn valid_blob() -> String {
-        let json = r#"{"account_id":7,"plan_code":"PRO","issued_at":1,"expires_at":9999999999,
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{:02x}", b)).collect()
+    }
+
+    fn blob(plan_code: &str, expires_at: i64) -> String {
+        let json = format!(
+            r#"{{"account_id":7,"plan_code":"{plan_code}","issued_at":1,"expires_at":{expires_at},
             "render_scale":1.0,"max_fps":60,"watermark":false,"max_record_minutes":120,
-            "max_streams":2,"lighting_enabled":true,"youtube_enabled":true}"#;
+            "max_streams":2,"lighting_enabled":true,"youtube_enabled":true}}"#
+        );
         base64_encode(json.as_bytes())
     }
 
-    fn sign(key: &[u8], blob_b64: &str) -> String {
-        let mut mac = Hmac::<Sha256>::new_from_slice(key).unwrap();
-        mac.update(blob_b64.as_bytes());
-        mac.finalize().into_bytes().iter().map(|b| format!("{:02x}", b)).collect()
+    /// A well-formed, unexpired license blob (base64 JSON).
+    fn valid_blob() -> String {
+        blob("PRO", 9_999_999_999)
+    }
+
+    /// A signing key that exists only for this test run. No private key is
+    /// ever stored in the repository.
+    fn throwaway_key() -> SigningKey {
+        SigningKey::from_bytes(&rand::random::<[u8; 32]>())
+    }
+
+    fn public_hex(key: &SigningKey) -> String {
+        hex(key.verifying_key().as_bytes())
+    }
+
+    fn sign(key: &SigningKey, blob_b64: &str) -> String {
+        hex(&key.sign(blob_b64.as_bytes()).to_bytes())
     }
 
     #[test]
-    fn key_halves_are_the_same_length() {
-        assert_eq!(HMAC_KEY_XOR.len(), HMAC_KEY_ROT.len());
+    fn committed_public_keys_are_usable() {
+        // An official build with no working key would silently reject every
+        // paid plan, so a typo in the list must fail here instead.
+        assert!(!LICENSE_PUBLIC_KEYS.is_empty());
+        for key_hex in LICENSE_PUBLIC_KEYS {
+            public_key(key_hex).expect("LICENSE_PUBLIC_KEYS entry must be a valid Ed25519 public key");
+        }
     }
 
     #[test]
-    fn blob_signed_with_empty_key_never_verifies() {
-        // Must hold both with a build key (signature mismatch) and without one
-        // (the empty-key guard) — otherwise keyless builds accept forged blobs.
+    fn blob_signed_with_a_trusted_key_verifies() {
+        let key = throwaway_key();
         let blob = valid_blob();
-        assert!(verify_and_parse(&blob, &sign(&[], &blob)).is_err());
+        let ent = verify_and_parse_with(&blob, &sign(&key, &blob), &[&public_hex(&key)])
+            .expect("valid signature");
+        assert_eq!(ent.account_id, 7);
+        assert_eq!(ent.plan_code, "PRO");
+        assert_eq!(ent.max_fps, 60);
+        assert!(!ent.watermark);
+    }
+
+    #[test]
+    fn any_one_trusted_key_is_enough() {
+        // Key rotation: a build trusts the outgoing and the incoming key.
+        let (old, new) = (throwaway_key(), throwaway_key());
+        let trusted = [public_hex(&old), public_hex(&new)];
+        let trusted: Vec<&str> = trusted.iter().map(String::as_str).collect();
+        let blob = valid_blob();
+        assert!(verify_and_parse_with(&blob, &sign(&old, &blob), &trusted).is_ok());
+        assert!(verify_and_parse_with(&blob, &sign(&new, &blob), &trusted).is_ok());
     }
 
     #[test]
     fn blob_signed_with_wrong_key_is_rejected() {
         let blob = valid_blob();
-        assert!(verify_and_parse(&blob, &sign(b"not-the-key", &blob)).is_err());
+        let forged = sign(&throwaway_key(), &blob);
+        // Against the keys this build ships with...
+        assert!(verify_and_parse(&blob, &forged).is_err());
+        // ...and against some other trusted key.
+        assert!(verify_and_parse_with(&blob, &forged, &[&public_hex(&throwaway_key())]).is_err());
     }
 
     #[test]
-    fn blob_signed_with_build_key_verifies() {
-        let key = hmac_key();
-        if key.is_empty() {
-            return; // built without REACT_LICENSE_HMAC_KEY — nothing to verify against
-        }
+    fn build_with_no_trusted_keys_rejects_everything() {
+        let key = throwaway_key();
         let blob = valid_blob();
-        let ent = verify_and_parse(&blob, &sign(&key, &blob)).expect("valid signature");
+        assert!(verify_and_parse_with(&blob, &sign(&key, &blob), &[]).is_err());
+    }
+
+    #[test]
+    fn unusable_trusted_keys_never_verify_anything() {
+        let key = throwaway_key();
+        let blob = valid_blob();
+        let signature = sign(&key, &blob);
+        for bad in ["", "not hex", "abcd", &"00".repeat(32), &"00".repeat(33)] {
+            assert!(verify_and_parse_with(&blob, &signature, &[bad]).is_err(), "trusted key {:?}", bad);
+        }
+    }
+
+    #[test]
+    fn tampered_blob_is_rejected() {
+        let key = throwaway_key();
+        let trusted = public_hex(&key);
+        let signature = sign(&key, &blob("FREE", 9_999_999_999));
+
+        // The signature is for a FREE blob; presenting it with a PRO blob must fail.
+        assert!(verify_and_parse_with(&valid_blob(), &signature, &[&trusted]).is_err());
+
+        // So must any single-character change to a correctly signed blob.
+        let blob = valid_blob();
+        let signature = sign(&key, &blob);
+        let mut chars: Vec<char> = blob.chars().collect();
+        chars[10] = if chars[10] == 'A' { 'B' } else { 'A' };
+        let tampered: String = chars.into_iter().collect();
+        assert!(verify_and_parse_with(&tampered, &signature, &[&trusted]).is_err());
+    }
+
+    #[test]
+    fn tampered_signature_is_rejected() {
+        let key = throwaway_key();
+        let blob = valid_blob();
+        let mut signature = sign(&key, &blob).into_bytes();
+        signature[0] = if signature[0] == b'0' { b'1' } else { b'0' };
+        let signature = String::from_utf8(signature).unwrap();
+        assert!(verify_and_parse_with(&blob, &signature, &[&public_hex(&key)]).is_err());
+    }
+
+    #[test]
+    fn legacy_hmac_signature_is_rejected() {
+        // What a pre-Ed25519 build left in the cache: 32 bytes of hex.
+        let blob = valid_blob();
+        assert!(verify_and_parse(&blob, &"ab".repeat(32)).is_err());
+    }
+
+    #[test]
+    fn malformed_signatures_are_rejected_without_panicking() {
+        let blob = valid_blob();
+        for bad in ["", "zz", "abc", &"0".repeat(128), &"ab".repeat(65), &"é".repeat(64), "ab\u{00e9}"] {
+            assert!(verify_and_parse(&blob, bad).is_err(), "signature {:?}", bad);
+        }
+    }
+
+    #[test]
+    fn expired_blob_is_rejected_even_when_correctly_signed() {
+        let key = throwaway_key();
+        let blob = blob("PRO", 1);
+        let err = verify_and_parse_with(&blob, &sign(&key, &blob), &[&public_hex(&key)]).unwrap_err();
+        assert!(err.to_string().contains("expired"));
+    }
+
+    // An envelope produced by the server's own signing code (compeller.ai's
+    // LicenseSigner on the JVM) with a key pair that was generated for this
+    // vector and then discarded. It pins the wire format across the two
+    // codebases: base64 payload, hex signature over the base64 text.
+    const SERVER_VECTOR_PUBLIC_KEY: &str = 
+        "28435fbdc02580f6b3080b6e6d0c88492c99ed76bc7ba86fe38847d7f306ed64";
+    const SERVER_VECTOR_LICENSE: &str = "eyJhY2NvdW50X2lkIjo3LCJwbGFuX2NvZGUiOiJQUk8iLCJpc3N1ZWRfYXQiOjE3OTQzNDU3NDEsImV4cGlyZXNfYXQiOjk5OTk5OTk5OTksInJlbmRlcl9zY2FsZSI6MS4wLCJtYXhfZnBzIjo2MCwid2F0ZXJtYXJrIjpmYWxzZSwibWF4X3JlY29yZF9taW51dGVzIjowLCJtYXhfc3RyZWFtcyI6MywibGlnaHRpbmdfZW5hYmxlZCI6dHJ1ZSwieW91dHViZV9lbmFibGVkIjp0cnVlfQ==";
+    const SERVER_VECTOR_SIGNATURE: &str = "8406bbbf09e677bffe812da3815e650a5d44c7d659a40601a06fe94b6889af1b06617f2461a758050965c12d02da46705780085427b90bf76cfc39948e224102";
+
+    #[test]
+    fn envelope_from_the_server_implementation_verifies() {
+        let ent = verify_and_parse_with(
+            SERVER_VECTOR_LICENSE,
+            SERVER_VECTOR_SIGNATURE,
+            &[SERVER_VECTOR_PUBLIC_KEY],
+        )
+        .expect("server-produced envelope");
+        assert_eq!(ent.account_id, 7);
         assert_eq!(ent.plan_code, "PRO");
-        assert_eq!(ent.max_fps, 60);
-        assert!(!ent.watermark);
+        assert_eq!(ent.max_streams, 3);
+        assert!(ent.lighting_enabled);
+
+        // Its key is not one this build trusts.
+        assert!(verify_and_parse(SERVER_VECTOR_LICENSE, SERVER_VECTOR_SIGNATURE).is_err());
+    }
+
+    /// Check a real `/api/licensing/blob` response against the keys this build
+    /// ships with, e.g. after a server deploy and before releasing a build:
+    ///
+    ///   REACT_LICENSE_ENVELOPE=/path/to/response.json \
+    ///     cargo test --features camera -- --ignored saved_server_response_verifies
+    #[test]
+    #[ignore = "needs REACT_LICENSE_ENVELOPE pointing at a saved /api/licensing/blob response"]
+    fn saved_server_response_verifies() {
+        let path = std::env::var("REACT_LICENSE_ENVELOPE").expect("REACT_LICENSE_ENVELOPE not set");
+        let body = std::fs::read(&path).expect("read envelope file");
+        let response: LicenseBlobResponse = serde_json::from_slice(&body).expect("envelope JSON");
+        let signature = response.signature_ed25519.expect("response has no signature_ed25519");
+
+        let ent = verify_and_parse(&response.license, &signature)
+            .expect("signature must verify against LICENSE_PUBLIC_KEYS");
+        println!("verified: plan={} account_id={}", ent.plan_code, ent.account_id);
+
+        // And the same response must stop verifying once the blob is altered.
+        let mut chars: Vec<char> = response.license.chars().collect();
+        chars[10] = if chars[10] == 'A' { 'B' } else { 'A' };
+        let tampered: String = chars.into_iter().collect();
+        assert!(verify_and_parse(&tampered, &signature).is_err());
     }
 }

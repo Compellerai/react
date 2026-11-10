@@ -351,7 +351,8 @@ impl AuthManager {
     }
 
     /// Validate the stored token with the server (call after restore_from_db)
-    /// If token is invalid, clears auth state so user must login again
+    /// If token is invalid, clears auth state so user must login again.
+    /// Once the token is confirmed (or silently renewed), refreshes the license blob.
     /// Spawns background thread, doesn't block
     pub fn validate_token_async(&self, db: crate::db::Database) {
         let token = match self.token.lock().clone() {
@@ -370,6 +371,7 @@ impl AuthManager {
             match Self::do_validate_token(&token) {
                 Ok(true) => {
                     log::info!("[Auth] Token validated successfully");
+                    Self::refresh_license(&token, &db, &entitlements);
                 }
                 Ok(false) => {
                     // Token rejected by the server (e.g. the 10h JWT from a
@@ -394,9 +396,9 @@ impl AuthManager {
                                     username: response.username.clone(),
                                     roles: response.roles.clone(),
                                 });
-                                *token_store.lock() = Some(response.access_token);
+                                *token_store.lock() = Some(response.access_token.clone());
                                 *refresh_token.lock() = response.refresh_token;
-                                Some(())
+                                Some(response.access_token)
                             }
                             Err(e) => {
                                 log::warn!("[Auth] Silent re-login failed: {}", e);
@@ -405,7 +407,9 @@ impl AuthManager {
                         }
                     });
 
-                    if renewed.is_none() {
+                    if let Some(renewed_token) = renewed {
+                        Self::refresh_license(&renewed_token, &db, &entitlements);
+                    } else {
                         // Definitively signed out — clear auth state
                         log::warn!("[Auth] Stored token is invalid or expired, clearing session");
                         *state.lock() = AuthState::Anon;
@@ -807,18 +811,32 @@ impl AuthManager {
 
         let entitlements = self.entitlements.clone();
 
-        std::thread::spawn(move || {
-            match license::fetch_license_blob(&token, &db) {
-                Ok(ent) => {
-                    log::info!("[Auth] License blob refreshed: plan={}", ent.plan_code);
-                    *entitlements.lock() = ent;
-                }
-                Err(e) => {
-                    // Keep existing entitlements on network error
-                    log::warn!("[Auth] License refresh failed (keeping cached): {}", e);
-                }
+        std::thread::spawn(move || Self::refresh_license(&token, &db, &entitlements));
+    }
+
+    /// Fetch a fresh license blob and apply it (blocking).
+    ///
+    /// Runs once per launch, right after a restored session's token is
+    /// confirmed, and then every 24h. The launch refresh is what picks up a
+    /// plan change between sessions, and what replaces a cached blob this
+    /// build can no longer verify (one signed by a pre-Ed25519 build). On any
+    /// failure the current entitlements stay: being offline never downgrades
+    /// a session.
+    fn refresh_license(
+        token: &str,
+        db: &crate::db::Database,
+        entitlements: &Arc<Mutex<Entitlements>>,
+    ) {
+        match license::fetch_license_blob(token, db) {
+            Ok(ent) => {
+                log::info!("[Auth] License blob refreshed: plan={}", ent.plan_code);
+                *entitlements.lock() = ent;
             }
-        });
+            Err(e) => {
+                // Keep existing entitlements on network error
+                log::warn!("[Auth] License refresh failed (keeping cached): {}", e);
+            }
+        }
     }
 
     /// Get connected account by provider

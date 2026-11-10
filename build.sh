@@ -5,12 +5,11 @@
 #   ./build.sh              # Full build with signing and notarization
 #   ./build.sh --dev        # Build with ad-hoc signing (no notarization)
 #
-#   ./build.sh --dev --no-license-key   # Community build, no private settings
+# --dev needs no private settings at all.
 #
 # A full build needs .env.local (untracked; see .env.example) with:
 #   APPLE_ID, APPLE_TEAM_ID, APPLE_PASSWORD   notarization credentials
 #   APPLE_SIGNING_IDENTITY                    "Developer ID Application: ..." identity
-#   REACT_LICENSE_HMAC_KEY                    license verification key
 
 set -e
 
@@ -26,21 +25,20 @@ echo ""
 
 # Parse arguments
 DEV_MODE=false
-ALLOW_NO_LICENSE_KEY=false
 for arg in "$@"; do
     case $arg in
         --dev)
             DEV_MODE=true
             ;;
         --no-license-key)
-            ALLOW_NO_LICENSE_KEY=true
+            # Accepted for old scripts. License blobs are verified with a public
+            # key that lives in the source, so there is no key to leave out.
             ;;
         --help|-h)
             echo "Usage: ./build.sh [OPTIONS]"
             echo ""
             echo "Options:"
             echo "  --dev             Build with ad-hoc signing (skip notarization)"
-            echo "  --no-license-key  Build without REACT_LICENSE_HMAC_KEY"
             echo "  --help            Show this help message"
             exit 0
             ;;
@@ -61,14 +59,6 @@ if [ "$DEV_MODE" = false ]; then
         echo "Or run with --dev for ad-hoc signing (no notarization)"
         exit 1
     fi
-fi
-
-# A distributable build without the license key cannot verify signed plan
-# entitlements — refuse unless that is explicitly intended.
-if [ -z "$REACT_LICENSE_HMAC_KEY" ] && [ "$ALLOW_NO_LICENSE_KEY" = false ]; then
-    echo "ERROR: REACT_LICENSE_HMAC_KEY is not set."
-    echo "Set it in $SCRIPT_DIR/.env.local, or pass --no-license-key to build without it."
-    exit 1
 fi
 
 # Set deployment target
