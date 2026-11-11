@@ -120,6 +120,10 @@ const PERC_TAU_S: f32 = 4.0;
 /// Below this INTENSITY LICENSE, the strobe + blinder lanes stand down
 /// regardless of genre.
 const PERC_LANE_MIN: f32 = 0.25;
+/// Below this DYNAMICS, the strobe, blinder and laser lanes stand down: the
+/// passage is low on the set's own scale (drums on their own read ~0.7, a
+/// bass-cut blend ~0.5, a breakdown ~0.25).
+const LANE_DYNAMICS_MIN: f32 = 0.55;
 
 // Intensity license: percussiveness × spectral fullness — the genre-free
 // "how hard may we hit right now" dial. Fullness reads the RAW bass and high
@@ -289,6 +293,13 @@ pub struct ShowBrain {
     /// clamp → low reading → stays Chill), and an operator style release
     /// snaps consumers straight back to the music's true level.
     raw_license: f32,
+    /// How big the passage is on the set's own scale (see `cue::dynamics`).
+    /// A measurement, not a permission: no style clamps it.
+    dynamics: super::dynamics::DynamicsMeter,
+    /// Tests only: hold dynamics at 1.0, i.e. the rig as it was before
+    /// dynamics existed, to measure the two against each other.
+    #[cfg(test)]
+    pub(crate) dynamics_held_open: bool,
     /// Operator style posture: clamps the license band and composes the
     /// genre lane gates most-restrictive-wins. Auto delegates to the
     /// resolver below.
@@ -403,6 +414,9 @@ impl ShowBrain {
             high_peak: 0.0,
             intensity_license: 1.0,
             raw_license: 1.0,
+            dynamics: super::dynamics::DynamicsMeter::new(),
+            #[cfg(test)]
+            dynamics_held_open: false,
             style: crate::emerge::LightingStyle::Auto,
             auto_resolver: crate::emerge::style::AutoStyleResolver::new(),
             last_debounced_arc: ArcState::Silence,
@@ -472,6 +486,18 @@ impl ShowBrain {
     /// strobe probability, and licensed mover depth.
     pub fn intensity_license(&self) -> f32 {
         self.intensity_license
+    }
+
+    /// Dynamics 0..1 — how big the passage is against the loudest sustained
+    /// passage of the last several minutes: ~0.3 a breakdown, ~0.7 drums on
+    /// their own, 1.0 everything in. Where the license says how hard the rig
+    /// MAY hit, this says how big the music IS; the rig settles under it.
+    pub fn dynamics(&self) -> f32 {
+        #[cfg(test)]
+        if self.dynamics_held_open {
+            return 1.0;
+        }
+        self.dynamics.value()
     }
 
     /// The UNCLAMPED license dial — the music's true level before the style
@@ -687,6 +713,9 @@ impl ShowBrain {
         // detonation. Runs before the cooldown stamp so a demoted lane never
         // burns its cooldown.
         self.enforce_atmosphere(&mut lanes);
+        // Nor is a low passage the place for the detonating lanes, grid or
+        // no grid.
+        self.enforce_low_passage(&mut lanes);
         // Exposure budget BEFORE cooldown stamping, keyed off the macro's
         // BlindersHold latch (not the blinder lane's 1-frame eligibility
         // pulse): stamping first burned the strobe's full musical cooldown on
@@ -708,8 +737,10 @@ impl ShowBrain {
             let strobe = &lanes[family_index(FixtureFamily::Strobe)];
             let topo = frame.brain.topology;
             log::info!(
-                "[ShowBrain] arc={:?} | energy={:.2} stab m/c={:.2}/{:.2} beat={:.2} drop={:.2} cooldown_lock={:.0} coherent={} lock={} | laser={} ({}) strobe={} ({})",
+                "[ShowBrain] arc={:?} | dynamics={:.2} license={:.2} energy={:.2} stab m/c={:.2}/{:.2} beat={:.2} drop={:.2} cooldown_lock={:.0} coherent={} lock={} | laser={} ({}) strobe={} ({})",
                 frame.brain.arc_state,
+                arc_signals.dynamics,
+                self.intensity_license,
                 metrics.energy,
                 metrics.stability,
                 cue.stability,
@@ -826,6 +857,10 @@ impl ShowBrain {
             self.style.clamp_license(self.raw_license)
         };
 
+        // Dynamics: the same raw bands, against a memory of minutes.
+        self.dynamics.update(dt, metrics.raw_energy, metrics.raw_bass, metrics.raw_high);
+        let dynamics = self.dynamics();
+
         // The CueEngine already publishes the energy derivative directly.
         let energy_rise = (cue.energy_slope * ENERGY_RISE_GAIN).clamp(0.0, 1.0);
 
@@ -862,6 +897,7 @@ impl ShowBrain {
             musical_cooldown_bar_lock: self.cooldown_bars_remaining.max(0.0),
             tension_plateau_s,
             intensity_license: self.intensity_license,
+            dynamics,
         }
     }
 
@@ -887,6 +923,25 @@ impl ShowBrain {
                 lane.eligible = false;
                 lane.intensity = 0.0;
                 lane.reason = "no percussive grid (atmosphere)";
+            }
+        }
+    }
+
+    /// Low-passage governor: strobe, blinder and laser stand down while the
+    /// music is low on the set's own scale (see `cue::dynamics`). A breakdown
+    /// with a busy hi-hat line still has a grid, so the atmosphere governor
+    /// lets it through — but it is not a moment to detonate, and holding
+    /// these lanes back is what gives them somewhere to go on the drop.
+    fn enforce_low_passage(&self, lanes: &mut [CueLaneIntent; 6]) {
+        if self.dynamics() >= LANE_DYNAMICS_MIN {
+            return;
+        }
+        for family in [FixtureFamily::Strobe, FixtureFamily::Blinder, FixtureFamily::Laser] {
+            let lane = &mut lanes[family_index(family)];
+            if lane.eligible {
+                lane.eligible = false;
+                lane.intensity = 0.0;
+                lane.reason = "low passage (dynamics)";
             }
         }
     }
@@ -2425,5 +2480,71 @@ mod tests {
             "mid-evidence drums pull the clock off the 122 default, got {}",
             est.bpm
         );
+    }
+
+    // ── Dynamics ────────────────────────────────────────────────────────────
+
+    /// Run ticks at 60fps for `secs` on a kick grid with the given raw bands.
+    fn run_bands(brain: &mut ShowBrain, secs: f32, bass: f32, mid: f32, high: f32) -> ShowBrainFrame {
+        let frames = (secs * 60.0) as u32;
+        let base = brain.last_now.unwrap_or(0.0);
+        let mut frame = None;
+        for i in 1..=frames {
+            let cue = CueSnapshot {
+                energy: 0.9,
+                energy_slow: 0.8,
+                stability: 0.9,
+                frame_time: base + i as f32 / 60.0,
+                dt: 1.0 / 60.0,
+                ..Default::default()
+            };
+            let metrics = LightingMetrics {
+                energy: 0.9,
+                stability: 0.9,
+                raw_energy: bass + mid + high,
+                raw_bass: bass,
+                raw_high: high,
+                beat_confidence: 0.9,
+                kick: i % 25 == 0,
+                onset: i % 25 == 0,
+                ..Default::default()
+            };
+            frame = Some(brain.tick(&cue, &metrics, &ClockInputs::default()));
+        }
+        frame.expect("at least one tick")
+    }
+
+    #[test]
+    fn dynamics_follows_the_low_end_and_closes_the_detonating_lanes() {
+        let mut brain = ShowBrain::new();
+        run_bands(&mut brain, 60.0, 0.0100, 0.0030, 0.00040);
+        assert!(brain.dynamics() > 0.95, "everything in: {}", brain.dynamics());
+
+        // The same grid and the same relative energy, with the low end and
+        // the tops out: pads and a vocal.
+        let low = run_bands(&mut brain, 12.0, 0.0008, 0.0022, 0.00010);
+        assert!(brain.dynamics() < LANE_DYNAMICS_MIN, "low end out: {}", brain.dynamics());
+        assert_eq!(low.arc_state, ArcState::Breakdown, "hot relative energy is still a breakdown");
+        for family in [FixtureFamily::Strobe, FixtureFamily::Blinder, FixtureFamily::Laser] {
+            assert!(!low.lane(family).eligible, "{family:?} stands down in a low passage");
+        }
+
+        // It comes straight back with the bass.
+        run_bands(&mut brain, 1.0, 0.0100, 0.0030, 0.00040);
+        assert!(brain.dynamics() > 0.9, "a second after the drop: {}", brain.dynamics());
+    }
+
+    #[test]
+    fn a_feed_with_no_band_split_leaves_dynamics_open() {
+        // Older producers and most tests carry a level but no bands.
+        let mut brain = ShowBrain::new();
+        run_material(&mut brain, 5.0, 25, 0.8);
+        let mut bare = ShowBrain::new();
+        for i in 1..=300 {
+            let cue = CueSnapshot { energy: 0.8, frame_time: i as f32 / 60.0, dt: 1.0 / 60.0, ..Default::default() };
+            let metrics = LightingMetrics { energy: 0.8, raw_energy: 0.01, ..Default::default() };
+            bare.tick(&cue, &metrics, &ClockInputs::default());
+        }
+        assert_eq!(bare.dynamics(), 1.0);
     }
 }

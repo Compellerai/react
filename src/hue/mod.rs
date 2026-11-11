@@ -493,6 +493,14 @@ pub struct CueSnapshot {
     /// atonal walls (post-rock) wander the lattice anchors, so chasing them
     /// reads as "jumping all over" exactly when the music asks for calm.
     pub intensity_license: f32,
+    /// Dynamics 0..1 (stamped from the show brain, like the license): how big
+    /// the passage is against the loudest sustained passage of the last
+    /// several minutes. ~0.3 a breakdown, ~0.7 drums on their own, 1.0
+    /// everything in. The rig settles under it — dimmer, how many beams are
+    /// lit, how far and how fast the heads move. 1.0 (the Default) is exactly
+    /// the rig's behaviour before this existed, so any path that does not
+    /// stamp it is unchanged.
+    pub dynamics: f32,
 }
 
 impl CueSnapshot {
@@ -612,6 +620,7 @@ impl CueSnapshot {
             clock_confidence: 0.0,
             // Stamped by the OSC thread; 1.0 = full license (classic behavior).
             intensity_license: 1.0,
+            dynamics: 1.0,
         }
     }
 }
@@ -701,6 +710,7 @@ impl Default for CueSnapshot {
             clock_beat: 0.0,
             clock_confidence: 0.0,
             intensity_license: 1.0,
+            dynamics: 1.0,
         }
     }
 }

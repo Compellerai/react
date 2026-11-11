@@ -5419,6 +5419,28 @@ impl ControlPanel {
                 new_config.lighting_style = selected_style;
                 *action = OscAction::UpdateConfig(new_config);
             }
+            // Dynamics: how big the passage is against the loudest one of the
+            // last few minutes. The rig settles under it, whatever the style.
+            let dynamics = state.dynamics.clamp(0.0, 1.0);
+            let dynamics_tint = if dynamics < 0.38 {
+                egui::Color32::from_rgb(130, 180, 255)
+            } else if dynamics < 0.82 {
+                egui::Color32::from_rgb(120, 220, 140)
+            } else {
+                egui::Color32::from_rgb(255, 150, 70)
+            };
+            ui.label(
+                egui::RichText::new(format!("{:>3.0}%", dynamics * 100.0))
+                    .color(dynamics_tint)
+                    .small()
+                    .monospace(),
+            )
+            .on_hover_text(
+                "Dynamics: how big this passage is against the loudest one of the last \
+                 few minutes. Around 25% is a breakdown, 50% a bass-cut blend, 70% drums \
+                 on their own, 100% everything in. Brightness, the number of beams lit \
+                 and how far the heads move all settle under it.",
+            );
 
             let fog_held = state.trigger_fog_held;
             let fog_latched = state.trigger_fog_latched;

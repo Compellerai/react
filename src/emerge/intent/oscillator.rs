@@ -31,6 +31,10 @@ const OSC_GATE_FULL: f32 = 0.40;
 /// ratio in place, sample twins and blend).
 const OSC_FLOW_LO: f32 = 0.12;
 const OSC_FLOW_HI: f32 = 0.55;
+/// The same blend on `dynamics`: fully half-time in a breakdown (~0.25), back
+/// at the designed rate by the time the drums are in on their own (~0.7).
+const OSC_FLOW_DYN_LO: f32 = 0.35;
+const OSC_FLOW_DYN_HI: f32 = 0.70;
 /// The slow twin's ratio multiplier: 0.5 = one octave down (half-time).
 const OSC_FLOW_HALF: f32 = 0.5;
 
@@ -130,6 +134,17 @@ fn smooth_ramp(energy_slow: f32, lo: f32, hi: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
+/// Flow blend for a frame: half-time when the music is quiet-but-playing
+/// (`energy_slow`, which is relative to the last few seconds) OR when the
+/// passage is low on the set's own scale (`dynamics`, which a long breakdown
+/// cannot drift out of). Whichever asks for more half-time wins; at full
+/// dynamics this is the energy blend alone.
+fn flow_for(snapshot: &CueSnapshot) -> f32 {
+    let by_energy = 1.0 - smooth_ramp(snapshot.energy_slow, OSC_FLOW_LO, OSC_FLOW_HI);
+    let by_dynamics = 1.0 - smooth_ramp(snapshot.dynamics, OSC_FLOW_DYN_LO, OSC_FLOW_DYN_HI);
+    by_energy.max(by_dynamics)
+}
+
 impl OscillatorFrameSnapshot {
     /// Build once per frame, then sample every binding from this immutable value
     /// so the demo rig stays phase-coherent.
@@ -155,7 +170,7 @@ impl OscillatorFrameSnapshot {
             // in the intent-layer base terms — deliberately not in the
             // oscillators.
             energy_env: smooth_ramp(snapshot.energy_slow, OSC_GATE_SILENCE, OSC_GATE_FULL),
-            flow: 1.0 - smooth_ramp(snapshot.energy_slow, OSC_FLOW_LO, OSC_FLOW_HI),
+            flow: flow_for(snapshot),
         }
     }
 
@@ -200,7 +215,7 @@ impl OscillatorFrameSnapshot {
             phrases_abs,
             phrase_count: phase.phrase_count,
             energy_env: smooth_ramp(snapshot.energy_slow, OSC_GATE_SILENCE, OSC_GATE_FULL),
-            flow: 1.0 - smooth_ramp(snapshot.energy_slow, OSC_FLOW_LO, OSC_FLOW_HI),
+            flow: flow_for(snapshot),
         }
     }
 

@@ -3067,6 +3067,7 @@ mod gigbar_section_tests {
 #[cfg(test)]
 mod profile_wire_tests {
     use super::*;
+    use crate::emerge::ArcState;
     use crate::emerge::profiles::load_atla_fixture_profile;
     use crate::emerge::{MoveFigure, MoveLook, MovementFrame};
 
@@ -3539,6 +3540,402 @@ mod profile_wire_tests {
         }
         assert!(moved > 24, "the figure changes what the head is sent: {moved}/32");
         assert!(apart > 24, "the two groups hold different places in it: {apart}/32");
+    }
+    // ── A whole song on the concert rig ─────────────────────────────────────
+    // The low passages have to read as low and the full ones as full, on the
+    // real show brain, the real normalizer and the real fixture intents. The
+    // song is scripted at the level the analyzer reports (raw band levels,
+    // kicks, tension); everything downstream of that is the shipping code.
+
+    #[derive(Clone, Copy, PartialEq)]
+    enum Shape {
+        Steady,
+        Build,
+        Drop,
+    }
+
+    #[derive(Clone, Copy)]
+    struct Passage {
+        name: &'static str,
+        secs: f32,
+        /// Raw band amplitudes, as the analyzer reports them.
+        bass: f32,
+        mid: f32,
+        high: f32,
+        /// Time-domain level the normalizer hears.
+        rms: f32,
+        kick: bool,
+        tension: f32,
+        stability: f32,
+        shape: Shape,
+    }
+
+    const fn passage(
+        name: &'static str,
+        secs: f32,
+        bands: (f32, f32, f32, f32),
+        kick: bool,
+        tension: f32,
+        stability: f32,
+        shape: Shape,
+    ) -> Passage {
+        Passage { name, secs, bass: bands.0, mid: bands.1, high: bands.2, rms: bands.3, kick, tension, stability, shape }
+    }
+
+    const EVERYTHING_IN: (f32, f32, f32, f32) = (0.0100, 0.0030, 0.00040, 0.30);
+    const DRUMS_ONLY: (f32, f32, f32, f32) = (0.0072, 0.0009, 0.00024, 0.16);
+    const PADS_AND_VOCAL: (f32, f32, f32, f32) = (0.0008, 0.0022, 0.00010, 0.11);
+    const BASS_CUT: (f32, f32, f32, f32) = (0.0015, 0.0028, 0.00038, 0.20);
+
+    const SONG: [Passage; 7] = [
+        passage("intro: drums only", 32.0, DRUMS_ONLY, true, 0.25, 0.80, Shape::Steady),
+        passage("groove: everything in", 64.0, EVERYTHING_IN, true, 0.35, 0.80, Shape::Steady),
+        passage("breakdown: pads + vocal", 48.0, PADS_AND_VOCAL, false, 0.45, 0.55, Shape::Steady),
+        passage("build", 16.0, PADS_AND_VOCAL, true, 0.85, 0.40, Shape::Build),
+        passage("drop: everything in", 64.0, EVERYTHING_IN, true, 0.35, 0.80, Shape::Drop),
+        passage("blend: bass cut", 24.0, BASS_CUT, true, 0.35, 0.75, Shape::Steady),
+        passage("back in", 32.0, EVERYTHING_IN, true, 0.35, 0.80, Shape::Steady),
+    ];
+
+    #[derive(Clone, Copy, Default, Debug)]
+    struct PassageStats {
+        dynamics: f32,
+        panel: f32,
+        hung: f32,
+        floor: f32,
+        galaxy: f32,
+        /// Fraction of frames the lasers are lit.
+        laser: f32,
+        /// Mean head speed of the hung beams, degrees per second.
+        pan_speed: f32,
+        tilt_speed: f32,
+        /// Fraction of frames the arc read as a peak (Drop or SustainPeak).
+        peak: f32,
+        /// The adaptive (renormalized) energy the rest of the engine reads.
+        energy: f32,
+        /// Frames spent in each arc, in `ARCS` order.
+        arcs: [f32; 9],
+        frames: f32,
+    }
+
+    const ARCS: [(ArcState, &str); 9] = [
+        (ArcState::Silence, "silence"),
+        (ArcState::Intro, "intro"),
+        (ArcState::Groove, "groove"),
+        (ArcState::Buildup, "buildup"),
+        (ArcState::PreDropTension, "pre-drop"),
+        (ArcState::Drop, "drop"),
+        (ArcState::SustainPeak, "peak"),
+        (ArcState::Cooldown, "cooldown"),
+        (ArcState::Breakdown, "breakdown"),
+    ];
+
+    impl PassageStats {
+        /// The arc the passage spent longest in.
+        fn arc(&self) -> &'static str {
+            let mut best = 0;
+            for i in 1..ARCS.len() {
+                if self.arcs[i] > self.arcs[best] {
+                    best = i;
+                }
+            }
+            ARCS[best].1
+        }
+    }
+
+    /// The concert stage in miniature: panels, five hung beams on one
+    /// address, three floor beams on another, GalaxyJets and lasers.
+    fn concert_rig() -> Vec<FixturePatch> {
+        let mut rig = Vec::new();
+        for i in 0..6 {
+            rig.push(panel(&format!("panel{i}"), 1));
+        }
+        for (i, aim) in [15.0, 22.0, 29.0, 36.0, 43.0].into_iter().enumerate() {
+            let mut head = beam(&format!("hung{i}"), 93);
+            head.rotation.x = aim;
+            rig.push(head);
+        }
+        for (i, aim) in [128.0, 137.0, 147.0].into_iter().enumerate() {
+            let mut head = beam(&format!("floor{i}"), 113);
+            head.rotation.x = aim;
+            rig.push(head);
+        }
+        for i in 0..2 {
+            let mut head = beam(&format!("galaxy{i}"), 139);
+            head.profile_id = "a36a0e1c-a9e9-4978-a62d-06e66c7b1ac8".to_string();
+            head.rotation.x = 40.0;
+            rig.push(head);
+        }
+        let mut laser = fixture(
+            "laser",
+            160,
+            StageVisualKind::Laser,
+            ChannelMap { dimmer: Some(160), laser_macro: Some(161), ..ChannelMap::default() },
+        );
+        laser.role = FixtureRole::Strobe;
+        rig.push(laser);
+        rig
+    }
+
+    /// Play `song` (after `lead_in_s` of a previous full track, so the set has
+    /// a scale) and average what the rig did in each passage, leaving out the
+    /// first six seconds of each as the transition. `dynamics_on = false`
+    /// holds dynamics open: the rig as it was before dynamics existed.
+    fn replay_song(song: &[Passage], lead_in_s: f32, dynamics_on: bool) -> Vec<PassageStats> {
+        use crate::audio::ControlSignalNormalizer;
+        use crate::emerge::{ClockInputs, LightingStyle, MovementDirector, PhaseState, ShowBrain};
+        use crate::render::LightingMetrics;
+
+        const FPS: f32 = 30.0;
+        const DT: f32 = 1.0 / FPS;
+        const BPM: f32 = 124.0;
+        const SETTLE_S: f32 = 6.0;
+
+        let rig = concert_rig();
+        let movers = MoverRanking::new(rig.iter());
+        let mut brain = ShowBrain::new();
+        brain.set_style(LightingStyle::Energetic);
+        brain.dynamics_held_open = !dynamics_on;
+        let mut director = MovementDirector::new();
+        let mut normalizer = ControlSignalNormalizer::new();
+
+        let lead_in = passage("previous track", lead_in_s, EVERYTHING_IN, true, 0.35, 0.80, Shape::Steady);
+        let mut stats = Vec::new();
+        let (mut t, mut frame_no) = (0.0f32, 0u64);
+        let (mut energy, mut energy_slow, mut bands) = (0.0f32, 0.0f32, (0.0f32, 0.0f32, 0.0f32));
+        let (mut tension, mut tension_bank, mut bass_pump, mut polarity_env) = (0.3f32, 0.0f32, 0.0f32, 0.0f32);
+        let mut last_pose: Option<(f32, f32)> = None;
+
+        for (index, p) in std::iter::once(&lead_in).chain(song.iter()).enumerate() {
+            let mut acc = PassageStats::default();
+            let frames = (p.secs * FPS) as usize;
+            for i in 0..frames {
+                let into = i as f32 * DT;
+                let along = into / p.secs;
+                let beat = (t * BPM / 60.0) as f64;
+                let beat_frac = beat.fract() as f32;
+                let on_beat = beat_frac < BPM / 60.0 * DT;
+                // A build is a snare roll on the half-beat with the tops and
+                // the level climbing; the low end stays out until the drop.
+                let rise = if p.shape == Shape::Build { along } else { 0.0 };
+                let (mid, high, rms) =
+                    (p.mid * (1.0 + 0.6 * rise), p.high * (1.0 + 4.0 * rise), p.rms * (1.0 + 0.9 * rise));
+                let pump = if p.kick && p.shape != Shape::Build { 1.0 - 0.45 * beat_frac } else { 1.0 };
+                let bass = p.bass * pump;
+                let onset = p.kick
+                    && (on_beat || (p.shape == Shape::Build && (beat_frac - 0.5).abs() < BPM / 120.0 * DT));
+
+                // The analyzer normalizes on its own FFT cadence (~6 Hz), and
+                // no two windows of real music measure the same: without that
+                // spread a steady passage would sit exactly on its own floor.
+                if frame_no % 5 == 0 {
+                    let wobble = 0.85 + 0.30 * ((frame_no as f32 * 12.9898).sin() * 43_758.547).fract().abs();
+                    let n = normalizer.normalize(bass * wobble, mid * wobble, high * wobble, rms * wobble);
+                    energy += (n.energy_vis - energy) * 0.6;
+                    bands = (n.bass, n.mid, n.high);
+                }
+                energy_slow += (energy - energy_slow) * 0.02;
+                let target_tension = if p.shape == Shape::Build { 0.45 + 0.40 * along } else { p.tension };
+                tension += (target_tension - tension) * 0.05;
+                let bank_target = if p.shape == Shape::Build { 0.70 * along } else { 0.0 };
+                tension_bank += (bank_target - tension_bank) * if bank_target > tension_bank { 0.05 } else { 0.25 };
+                bass_pump = if onset && p.shape != Shape::Build { 1.0 } else { bass_pump * (-DT / 0.15).exp() };
+                // The cue engine holds the drop's impact while the energy stays up.
+                let drop_impact = if p.shape == Shape::Drop {
+                    if into < 4.0 { 0.77 } else { 0.77 * (-(into - 4.0) / 0.8).exp() }
+                } else {
+                    0.0
+                };
+                let quadrant = ((t / 9.0) as u32 % 4) as u8;
+                let flipped = (((t - DT).max(0.0) / 9.0) as u32 % 4) as u8 != quadrant;
+                polarity_env = if flipped { 1.0 } else { polarity_env * (-DT / 0.6).exp() };
+
+                let cue = CueSnapshot {
+                    energy,
+                    energy_slow,
+                    bass: bands.0,
+                    mid: bands.1,
+                    high: bands.2,
+                    tension,
+                    tension_dyn: if p.shape == Shape::Build { 0.3 + 0.6 * along } else { 0.2 },
+                    tension_bank,
+                    stability: p.stability,
+                    balance: 0.5,
+                    major_smooth: 0.6,
+                    excitement: 0.5,
+                    bass_pump,
+                    drop_impact,
+                    kick: onset,
+                    onset,
+                    polarity_quadrant: quadrant,
+                    polarity_env,
+                    phase: (t * 0.05).fract(),
+                    journey_phase: crate::render::HeroAct::Lock,
+                    reactivity: 1.0,
+                    trust: 1.0,
+                    intensity_license: brain.intensity_license(),
+                    dynamics: brain.dynamics(),
+                    frame_time: t,
+                    dt: DT,
+                    frame_seq: frame_no + 1,
+                    ..CueSnapshot::default()
+                };
+                let metrics = LightingMetrics {
+                    energy,
+                    stability: p.stability,
+                    balance: 0.5,
+                    tension,
+                    beat_confidence: if p.kick { 0.8 } else { 0.15 },
+                    onset,
+                    kick: onset && p.shape != Shape::Build,
+                    onset_strength: if onset { 1.0 } else { 0.0 },
+                    major_likelihood: 0.6,
+                    bass: bands.0,
+                    mid: bands.1,
+                    high: bands.2,
+                    raw_energy: bass + mid + high,
+                    raw_bass: bass,
+                    raw_high: high,
+                    trust: 1.0,
+                    ..LightingMetrics::default()
+                };
+                let frame = brain.tick(&cue, &metrics, &ClockInputs::default());
+                let mut cue = cue;
+                cue.dynamics = brain.dynamics();
+                cue.movement = director.tick(&cue, frame.arc_state, frame.clock.beat, frame.clock.tempo_bpm, DT);
+                let osc = OscillatorFrameSnapshot::from_clock(&cue, PhaseState::from_show_clock(frame.clock));
+
+                let mut level = [0.0f32; 5];
+                let mut seen = [0.0f32; 5];
+                let mut pose = (0.0f32, 0.0f32);
+                for fx in &rig {
+                    let (ordinal, aim) = movers.place(fx);
+                    let intent =
+                        render_fixture_intent_aimed(&cue, fx, &osc, Some(&frame), ordinal, movers.count(), aim);
+                    let group = match fx.start_address {
+                        1 => 0,
+                        93 => 1,
+                        113 => 2,
+                        139 => 3,
+                        _ => 4,
+                    };
+                    level[group] += if group == 4 { (intent.dimmer > 0.0) as u8 as f32 } else { intent.dimmer };
+                    seen[group] += 1.0;
+                    if fx.id == "hung0" {
+                        pose = (intent.pan, intent.tilt);
+                    }
+                }
+                if into >= SETTLE_S {
+                    acc.frames += 1.0;
+                    acc.dynamics += brain.dynamics();
+                    acc.panel += level[0] / seen[0];
+                    acc.hung += level[1] / seen[1];
+                    acc.floor += level[2] / seen[2];
+                    acc.galaxy += level[3] / seen[3];
+                    acc.laser += level[4] / seen[4];
+                    if let Some((pan, tilt)) = last_pose {
+                        acc.pan_speed += (pose.0 - pan).abs() * MOVER_PAN_WINDOW_DEG / DT;
+                        acc.tilt_speed += (pose.1 - tilt).abs() * MOVER_TILT_WINDOW_DEG / DT;
+                    }
+                    if matches!(frame.arc_state, ArcState::Drop | ArcState::SustainPeak) {
+                        acc.peak += 1.0;
+                    }
+                    acc.energy += energy;
+                    if let Some(slot) = ARCS.iter().position(|(arc, _)| *arc == frame.arc_state) {
+                        acc.arcs[slot] += 1.0;
+                    }
+                }
+                last_pose = Some(pose);
+                t += DT;
+                frame_no += 1;
+            }
+            if index > 0 {
+                let n = acc.frames.max(1.0);
+                stats.push(PassageStats {
+                    dynamics: acc.dynamics / n,
+                    panel: acc.panel / n,
+                    hung: acc.hung / n,
+                    floor: acc.floor / n,
+                    galaxy: acc.galaxy / n,
+                    laser: acc.laser / n,
+                    pan_speed: acc.pan_speed / n,
+                    tilt_speed: acc.tilt_speed / n,
+                    peak: acc.peak / n,
+                    energy: acc.energy / n,
+                    arcs: acc.arcs,
+                    frames: n,
+                });
+            }
+        }
+        stats
+    }
+
+    #[test]
+    fn the_rig_settles_in_a_breakdown_and_holds_back_until_the_drop() {
+        let song = [
+            passage("groove", 14.0, EVERYTHING_IN, true, 0.35, 0.80, Shape::Steady),
+            passage("breakdown", 20.0, PADS_AND_VOCAL, false, 0.45, 0.55, Shape::Steady),
+            passage("build", 12.0, PADS_AND_VOCAL, true, 0.85, 0.40, Shape::Build),
+            passage("drop", 14.0, EVERYTHING_IN, true, 0.35, 0.80, Shape::Drop),
+        ];
+        let stats = replay_song(&song, 46.0, true);
+        let (groove, breakdown, build, drop) = (stats[0], stats[1], stats[2], stats[3]);
+
+        // The full passages read as full and are lit like it.
+        assert!(groove.dynamics > 0.95 && drop.dynamics > 0.95, "{groove:?} {drop:?}");
+        assert!(groove.panel > 0.5 && groove.hung > 0.3 && groove.floor > 0.3, "{groove:?}");
+
+        // The breakdown settles: the colour body and the first beam group to
+        // well under half, every other beam group and the lasers dark.
+        assert!(breakdown.dynamics < 0.35, "{breakdown:?}");
+        assert!(breakdown.panel < groove.panel * 0.4, "{breakdown:?} vs {groove:?}");
+        assert!(breakdown.hung < groove.hung * 0.5 && breakdown.hung > 0.05, "{breakdown:?}");
+        assert!(breakdown.floor < 0.02 && breakdown.galaxy < 0.02, "{breakdown:?}");
+        assert_eq!(breakdown.laser, 0.0);
+        // For its first seconds a fall this large reads as nothing at all on
+        // adaptive energy (the silence arc: a slow sweep); it must never be
+        // played as a groove.
+        let quiet_frames = breakdown.arcs[0] + breakdown.arcs[8];
+        assert!(quiet_frames >= breakdown.frames as f32 * 0.9, "{breakdown:?}");
+
+        // The build is hot on relative energy and must not be played as the
+        // peak: no lasers, no peak looks, and visibly less light than the
+        // drop it is leading to.
+        assert!(build.energy > groove.energy, "on adaptive energy the build out-reads the groove: {build:?}");
+        assert_eq!(build.peak, 0.0, "{build:?}");
+        assert_eq!(build.laser, 0.0, "{build:?}");
+        assert!(build.panel < drop.panel * 0.75, "{build:?} vs {drop:?}");
+        assert!(build.pan_speed < drop.pan_speed, "{build:?} vs {drop:?}");
+    }
+
+    /// `cargo test song_replay_report -- --ignored --nocapture`
+    #[test]
+    #[ignore = "prints a before/after table; run by hand"]
+    fn song_replay_report() {
+        for (label, on) in [("BEFORE (dynamics held open)", false), ("AFTER", true)] {
+            println!("\n{label}");
+            println!(
+                "{:<26} {:>5} {:>6} {:>6} {:>6} {:>6} {:>6} {:>6} {:>7} {:>7} {:>5}  {}",
+                "passage", "dyn", "energy", "panel", "hung", "floor", "galaxy", "laser", "pan°/s", "tilt°/s", "peak", "arc"
+            );
+            for (p, s) in SONG.iter().zip(replay_song(&SONG, 60.0, on)) {
+                println!(
+                    "{:<26} {:>5.2} {:>6.2} {:>6.2} {:>6.2} {:>6.2} {:>6.2} {:>5.0}% {:>7.1} {:>7.1} {:>4.0}%  {}",
+                    p.name,
+                    s.dynamics,
+                    s.energy,
+                    s.panel,
+                    s.hung,
+                    s.floor,
+                    s.galaxy,
+                    s.laser * 100.0,
+                    s.pan_speed,
+                    s.tilt_speed,
+                    s.peak * 100.0,
+                    s.arc()
+                );
+            }
+        }
     }
 }
 

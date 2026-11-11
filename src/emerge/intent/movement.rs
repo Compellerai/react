@@ -699,6 +699,39 @@ fn ease(dt: f32, tau: f32) -> f32 {
     1.0 - (-dt.max(0.0) / tau.max(1e-3)).exp()
 }
 
+// ── Dynamics: settle in the low passages ────────────────────────────────────
+// `snapshot.dynamics` says how big the passage is on the set's own scale (see
+// `cue::dynamics`): a breakdown reads ~0.25, a bass-cut blend ~0.5, drums on
+// their own ~0.7, everything in 1.0. The rig opens with it.
+
+/// Dynamics at or below which the rig is fully settled...
+const DYNAMICS_SETTLED: f32 = 0.25;
+/// ...and at or above which it is exactly the rig it was before dynamics
+/// existed. In between it opens in proportion.
+const DYNAMICS_OPEN: f32 = 0.90;
+
+/// 0 in a low passage, 1 once the music is at full weight. Everything that
+/// settles scales on this, so a snapshot that never had dynamics stamped
+/// (1.0) is untouched.
+pub(crate) fn dynamics_lift(snapshot: &CueSnapshot) -> f32 {
+    ((snapshot.dynamics - DYNAMICS_SETTLED) / (DYNAMICS_OPEN - DYNAMICS_SETTLED)).clamp(0.0, 1.0)
+}
+
+/// Blend from `settled` (lift 0) to 1.0 (lift 1).
+pub(crate) fn settle(settled: f32, lift: f32) -> f32 {
+    settled + (1.0 - settled) * lift.clamp(0.0, 1.0)
+}
+
+/// Below this dynamics every figure runs at half speed.
+const SLOW_DYNAMICS: f32 = 0.45;
+/// A polarity flip in a settled passage: the level glides this slowly, and a
+/// flip sooner than this after the last change is ignored. (At full weight
+/// they are `LEVEL_TAU_FLIP_S` and `LEVEL_MIN_HOLD_S`.)
+const LEVEL_TAU_SETTLED_FLIP_S: f32 = 2.4;
+const LEVEL_SETTLED_HOLD_S: f32 = 8.0;
+/// What is left of a chord-change throw in a settled passage.
+const SETTLED_THROW: f32 = 0.35;
+
 /// Pick the look for a moment in the music. Pure: the same arc, harmony and
 /// rotation always give the same look. `rotation` steps once per phrase so the
 /// pool for an arc is walked in order and never repeats back-to-back.
@@ -713,9 +746,11 @@ pub fn choose_look(arc: ArcState, snapshot: &CueSnapshot, rotation: u32) -> Move
             return look;
         }
         let busy = snapshot.harmonic_rhythm;
-        let bars = if busy > RHYTHM_BUSY {
+        let bars = if busy > RHYTHM_BUSY && snapshot.dynamics >= SLOW_DYNAMICS {
             (look.bars * 0.5).max(1.0)
-        } else if busy < RHYTHM_CALM && snapshot.energy_slow < CALM_ENERGY {
+        } else if (busy < RHYTHM_CALM && snapshot.energy_slow < CALM_ENERGY)
+            || snapshot.dynamics < SLOW_DYNAMICS
+        {
             look.bars * 2.0
         } else {
             look.bars
@@ -894,7 +929,11 @@ impl MovementDirector {
         self.level_age += dt;
         let flipped = self.primed && snapshot.polarity_quadrant != self.polarity;
         self.polarity = snapshot.polarity_quadrant;
-        let flip_step = flipped && self.level_age >= LEVEL_MIN_HOLD_S;
+        // In a settled passage the harmony changing sides is a slow turn of
+        // the rig, not a snap: flips are taken less often and glide.
+        let lift = dynamics_lift(snapshot);
+        let flip_hold = LEVEL_SETTLED_HOLD_S + (LEVEL_MIN_HOLD_S - LEVEL_SETTLED_HOLD_S) * lift;
+        let flip_step = flipped && self.level_age >= flip_hold;
         if phrase_changed || flip_step {
             self.level_step = self.level_step.wrapping_add(1);
         }
@@ -906,7 +945,7 @@ impl MovementDirector {
                 self.level_tau = if arc == ArcState::Drop {
                     LEVEL_TAU_DROP_S
                 } else if flip_step {
-                    LEVEL_TAU_FLIP_S
+                    LEVEL_TAU_SETTLED_FLIP_S + (LEVEL_TAU_FLIP_S - LEVEL_TAU_SETTLED_FLIP_S) * lift
                 } else if matches!(arc, ArcState::Buildup | ArcState::PreDropTension) {
                     LEVEL_TAU_BUILD_S
                 } else {
@@ -958,7 +997,7 @@ impl MovementDirector {
             // A fast progression would otherwise hammer the heads — back the
             // kick off as the harmonic rhythm climbs.
             let calm = 1.0 - 0.5 * snapshot.harmonic_rhythm.clamp(0.0, 1.0);
-            self.throw = side * reach * calm * gate;
+            self.throw = side * reach * calm * gate * settle(SETTLED_THROW, lift);
         }
         self.last_change_env = snapshot.chord_change_env;
 
@@ -1883,5 +1922,60 @@ mod tests {
         let resolved = CueSnapshot { chord_quality: 1, ..playing() };
         let (f, _) = run(&mut d, &resolved, ArcState::Groove, 8.0, 1.0);
         assert_eq!(f.gather, 0.0, "and the resolution lets go");
+    }
+
+    // ── Dynamics ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn full_dynamics_is_the_rig_as_it_was() {
+        assert_eq!(dynamics_lift(&CueSnapshot::default()), 1.0);
+        assert_eq!(dynamics_lift(&CueSnapshot { dynamics: 0.25, ..playing() }), 0.0);
+        let mid = dynamics_lift(&CueSnapshot { dynamics: 0.55, ..playing() });
+        assert!(mid > 0.3 && mid < 0.6, "a bass-cut blend opens the rig part way: {mid}");
+        assert_eq!(settle(0.4, 1.0), 1.0);
+        assert_eq!(settle(0.4, 0.0), 0.4);
+    }
+
+    #[test]
+    fn a_low_passage_runs_its_figures_at_half_speed() {
+        let full = playing();
+        let low = CueSnapshot { dynamics: 0.30, ..playing() };
+        for arc in [ArcState::Groove, ArcState::Breakdown] {
+            for rotation in 0..4 {
+                let (at_full, at_low) = (choose_look(arc, &full, rotation), choose_look(arc, &low, rotation));
+                assert_eq!(at_full.figure, at_low.figure, "dynamics changes the pace, not the figure");
+                if !at_full.is_sweep() {
+                    assert_eq!(at_low.bars, at_full.bars * 2.0, "{arc:?} #{rotation}");
+                }
+            }
+        }
+        // A busy progression doubles the pace of a full passage, never of a
+        // low one.
+        let busy = CueSnapshot { harmonic_rhythm: 0.9, ..playing() };
+        let busy_low = CueSnapshot { dynamics: 0.30, ..busy.clone() };
+        assert!(
+            choose_look(ArcState::Groove, &busy_low, 0).bars > choose_look(ArcState::Groove, &busy, 0).bars
+        );
+    }
+
+    #[test]
+    fn a_polarity_flip_in_a_settled_passage_is_held_off_and_then_glides() {
+        let flip_after = |dynamics: f32, wait_s: f32| {
+            let mut d = MovementDirector::new();
+            let warm = CueSnapshot { major_smooth: 0.8, polarity_quadrant: 0, dynamics, ..playing() };
+            let cool = CueSnapshot { polarity_quadrant: 2, ..warm.clone() };
+            let (before, beat) = run(&mut d, &warm, ArcState::Groove, 64.0, wait_s);
+            let (after, _) = run(&mut d, &cool, ArcState::Groove, beat, 1.0);
+            (after.level - before.level).abs().max((after.split - before.split).abs())
+        };
+        // Four seconds after the last level change a full passage takes the
+        // flip; a settled one lets it pass.
+        assert!(flip_after(1.0, 4.0) > 0.3);
+        assert!(flip_after(0.20, 4.0) < 0.02, "a settled passage ignores a flip this soon");
+        // Once it is due, the settled rig still turns — but a second in, it
+        // has covered well under half of what the full rig has.
+        let (settled, full) = (flip_after(0.20, 9.0), flip_after(1.0, 9.0));
+        assert!(settled > 0.05, "the settled rig does take the flip: {settled}");
+        assert!(settled < full * 0.5, "…slowly: {settled} vs {full}");
     }
 }

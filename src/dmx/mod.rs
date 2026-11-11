@@ -580,6 +580,12 @@ impl DmxManager {
         self.show_brain.intensity_license()
     }
 
+    /// Show-brain dynamics 0..1: how big the passage is on the set's own
+    /// scale. The app stamps it onto the next engine frame's snapshot.
+    pub fn dynamics(&self) -> f32 {
+        self.show_brain.dynamics()
+    }
+
     pub fn virtual_stage_enabled(&self) -> bool {
         self.virtual_stage.is_enabled()
     }
@@ -1312,6 +1318,14 @@ impl DmxManager {
         // Mover choreography: one director decides the figure + harmonic
         // steering for the whole rig this frame (arc from the show brain,
         // chords from the snapshot, real frame dt for the crossfades).
+        // Dynamics is this frame's reading, straight from the brain that was
+        // just ticked: the copy on the engine snapshot is a frame behind, and
+        // a path that never feeds the engine would not carry one at all.
+        let snapshot = &{
+            let mut s = snapshot.clone();
+            s.dynamics = self.show_brain.dynamics();
+            s
+        };
         let movement = self.movement.tick(
             snapshot,
             brain.arc_state,

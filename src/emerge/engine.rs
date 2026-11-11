@@ -86,6 +86,10 @@ pub struct LightingInput {
     /// spectral fullness). Shapes the CueEngine Pump (bloom vs detonation)
     /// and thins strobe probability — an EDM vocal bridge softens the show.
     pub intensity_license: f32,
+    /// Show-brain dynamics 0..1 (how big the passage is on the set's own
+    /// scale). Stamped onto the snapshot so every sink settles in the low
+    /// passages together.
+    pub dynamics: f32,
     /// Operator "Dom" toggle (the Quaternion-wheel `qs_dominant_only`): true
     /// = fixtures colour off the single dominant pitch (today's behaviour),
     /// false = obey the all-notes chromatic blend. One control governs the
@@ -116,6 +120,7 @@ impl LightingInput {
             },
             arc_state: crate::emerge::ArcState::Silence,
             intensity_license: 1.0,
+            dynamics: 1.0,
             dominant_only: true,
             effective_style: crate::emerge::LightingStyle::Auto,
         }
@@ -716,6 +721,7 @@ impl LightingEngine {
         // to a ghost tempo through a stall (g == 1.0 while the feed is live).
         cue_snap.clock_confidence = li.show_clock.confidence * g;
         cue_snap.intensity_license = li.intensity_license;
+        cue_snap.dynamics = li.dynamics.clamp(0.0, 1.0);
         // Operator strobe rate → the DMX manager builds the global strobe
         // square wave at this Hz (UI "Strobe Rate" slider).
         cue_snap.strobe_rate_hz = self.manual_triggers.config.strobe_rate_hz;

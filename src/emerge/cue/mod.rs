@@ -10,6 +10,7 @@
 //! `lighting_cue::eval_segment` / `operator_segment_kind`.
 
 pub(crate) mod cue_engine;
+pub(crate) mod dynamics;
 pub(crate) mod lighting_cue;
 pub(crate) mod lighting_cue_worker;
 pub(crate) mod show_brain;

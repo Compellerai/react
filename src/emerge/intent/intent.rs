@@ -4,7 +4,7 @@
 //! are an output encoding, not the lighting model. This module keeps one
 //! per-frame, oscillator-driven fixture state between CueSnapshot and DMX.
 
-use super::movement::{MotionContext, MoverSlot};
+use super::movement::{dynamics_lift, settle, MotionContext, MoverSlot};
 use super::oscillator::{
     add_bipolar, OscillatorBinding, OscillatorFrameSnapshot,
     OscillatorInterval, OscillatorShape,
@@ -107,6 +107,69 @@ fn journey_motion_scale(snapshot: &CueSnapshot) -> f32 {
             let decay = (1.0 - t / JOURNEY_AFTERGLOW_FADE_S).clamp(0.0, 1.0);
             JOURNEY_AFTERGLOW_MOTION_FLOOR + (1.0 - JOURNEY_AFTERGLOW_MOTION_FLOOR) * decay
         }
+    }
+}
+
+// ── Dynamics: settle in the low passages, open only when the music is big ───
+// `snapshot.dynamics` is how big the passage is against the loudest one of
+// the last several minutes (see `cue::dynamics`). `dynamics_lift` turns it
+// into 0 (settled) .. 1 (open); at 1 every scale below is exactly 1.0, so the
+// rig at full weight is the rig it always was and everything here only ever
+// takes away. Three things settle: how bright the colour body is, how many
+// beam groups are lit, and how far the heads travel.
+/// What is left of the colour body (panels, washes) when fully settled.
+const SETTLED_BODY: f32 = 0.30;
+/// What is left of the FIRST beam group when fully settled. The other groups
+/// go dark, and come back one at a time as the music fills in — a breakdown
+/// is a few slow beams, not the whole rig turned down.
+const SETTLED_BEAM: f32 = 0.40;
+/// How far through the lift the LAST beam group starts to fade in...
+const BEAM_STAGGER: f32 = 0.75;
+/// ...and how much lift any one group takes to fade in fully.
+const BEAM_FADE: f32 = 0.35;
+/// What is left of the movers' travel when fully settled.
+const SETTLED_MOTION: f32 = 0.45;
+/// How much brighter the beams go on a drop (on top of their groove level).
+const BEAM_DROP_LIFT: f32 = 0.45;
+/// What is left of a polarity flip's pan throw when fully settled.
+const SETTLED_FLIP_THROW: f32 = 0.30;
+
+/// Movement-depth multiplier (0.45..1.0) from dynamics — composes with the
+/// journey and coherence scales, so a settled passage sweeps a tighter arc.
+fn dynamics_motion_scale(snapshot: &CueSnapshot) -> f32 {
+    settle(SETTLED_MOTION, dynamics_lift(snapshot))
+}
+
+/// How lit beam group `ordinal` of `count` is at this `lift`. Groups come up
+/// in address order; the first never goes fully dark.
+fn beam_presence(lift: f32, ordinal: usize, count: usize) -> f32 {
+    let groups = count.max(1) as f32;
+    let start = BEAM_STAGGER * (ordinal.min(count.saturating_sub(1)) as f32 / groups);
+    let presence = smoothstep(start, start + BEAM_FADE, lift);
+    if ordinal == 0 {
+        settle(SETTLED_BEAM, presence)
+    } else {
+        presence
+    }
+}
+
+/// Intensity multiplier from dynamics for one fixture, applied uniformly over
+/// dimmer + colour like the journey macro. Lasers and strobes skip it: their
+/// lanes are gated outright in a low passage by the show brain.
+fn dynamics_dimmer_scale(
+    snapshot: &CueSnapshot,
+    visual_kind: StageVisualKind,
+    mover_ordinal: usize,
+    mover_count: usize,
+) -> f32 {
+    let lift = dynamics_lift(snapshot);
+    if lift >= 1.0 {
+        return 1.0;
+    }
+    match visual_kind {
+        StageVisualKind::Laser | StageVisualKind::Strobe => 1.0,
+        StageVisualKind::Beam | StageVisualKind::Gobo => beam_presence(lift, mover_ordinal, mover_count),
+        StageVisualKind::Wash | StageVisualKind::LedPanel => settle(SETTLED_BODY, lift),
     }
 }
 
@@ -397,6 +460,18 @@ pub fn render_fixture_intent_aimed(
         intent.white = (intent.white * journey_dimmer).clamp(0.0, 1.0);
     }
 
+    // Dynamics: the same uniform scale, from how big the passage is. A manual
+    // blinder is applied after this (apply_global_overrides), so the operator
+    // still gets full white in a breakdown.
+    let settled = dynamics_dimmer_scale(snapshot, fixture.visual_kind, mover_ordinal, mover_count);
+    if settled < 0.999 {
+        intent.dimmer *= settled;
+        intent.red *= settled;
+        intent.green *= settled;
+        intent.blue *= settled;
+        intent.white *= settled;
+    }
+
     // Show-brain gate: intense lanes go dark when the brain rules them
     // ineligible. Wash/mover/gobo/blinder stay unwired until later slices.
     // A manual operator trigger always wins — the gate never overrides a
@@ -542,6 +617,13 @@ fn dimmer_for_fixture(
                 // "chords" are detector guesses doesn't blink.
                 + chord_accent(snapshot) * CHORD_DIMMER_BLOOM
                     * snapshot.intensity_license.clamp(0.0, 1.0)
+                // The drop is the one moment the beams go to full: they sit
+                // at a groove level otherwise, so without this a banger had
+                // no more beam than the verse before it. Rides the cue
+                // engine's drop impact, which holds while the energy stays up
+                // and then lets go; sized by dynamics so a "drop" called in a
+                // low passage stays small.
+                + snapshot.drop_impact.clamp(0.0, 1.0) * BEAM_DROP_LIFT * dynamics_lift(snapshot)
         }
         FixtureRole::Strobe => 0.18 + snapshot.drop_impact * 0.22,
     };
@@ -858,8 +940,14 @@ fn pan_for_fixture(
             let throw_to = 0.5 + (snapshot.qc_ports[q] - 0.5) * PORT_SPREAD;
             // B3: quaternion overlay strength punches the harmonic snap harder on a
             // lattice lock-in (additive over the Part A throw; no lattice = baseline).
-            let center_chase =
-                base + (throw_to - base) * snapshot.polarity_env * THROW * qc_accent_boost(snapshot);
+            // In a settled passage a flip is a lean toward the new side, not a
+            // throw across the room.
+            let center_chase = base
+                + (throw_to - base)
+                    * snapshot.polarity_env
+                    * THROW
+                    * qc_accent_boost(snapshot)
+                    * settle(SETTLED_FLIP_THROW, dynamics_lift(snapshot));
             // SCAN/CHASE crossfade on the intensity license: atonal walls
             // (post-rock, ambient) wander the lattice anchors, so chasing them
             // reads as "jumping all over" exactly when the music asks for a
@@ -900,7 +988,7 @@ fn pan_for_fixture(
             // atonal field collapses `trust_motion`, and a frozen head is the
             // wrong kind of calm.
             let motion_full = journey_motion_scale(snapshot) * trust_motion(snapshot)
-                * tonnetz_motion_punch(snapshot);
+                * tonnetz_motion_punch(snapshot) * dynamics_motion_scale(snapshot);
             let motion = motion_full * license + SCAN_MOTION_FLOOR * (1.0 - license);
             let legacy =
                 add_bipolar(center, sweep * (1.0 + 0.4 * snapshot.energy * license) * motion);
@@ -978,7 +1066,7 @@ fn tilt_for_fixture(
             // B5 all-in: surprise widens the sweep; + a smooth harmonic-position drift
             // toward the Tonnetz fifths centroid (gated by tonal confidence).
             let motion_full = journey_motion_scale(snapshot) * trust_motion(snapshot)
-                * tonnetz_motion_punch(snapshot);
+                * tonnetz_motion_punch(snapshot) * dynamics_motion_scale(snapshot);
             // SCAN/CHASE crossfade (see pan_for_fixture): license low → the
             // wandering field/Tonnetz drift fades out and the tilt settles
             // near FOH with a gentle guaranteed sweep; high → classic.
@@ -2169,5 +2257,61 @@ mod tests {
             let (r, g, b, w) = segment_rgbw(&cue, 0.0, seg, 8);
             assert_eq!((r, g, b, w), (0.0, 0.0, 0.0, 0.0), "cell {seg} dark at dimmer 0");
         }
+    }
+
+    // ── Dynamics ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn beam_groups_come_back_one_at_a_time() {
+        // Fully settled: the first group is dim, the rest are dark.
+        assert!((beam_presence(0.0, 0, 3) - SETTLED_BEAM).abs() < 1e-6);
+        assert_eq!(beam_presence(0.0, 1, 3), 0.0);
+        assert_eq!(beam_presence(0.0, 2, 3), 0.0);
+        // Open: every group is exactly as it was.
+        for group in 0..3 {
+            assert_eq!(beam_presence(1.0, group, 3), 1.0);
+        }
+        // In between they arrive in address order and never go backwards.
+        let mut last = [0.0f32; 3];
+        for step in 0..=20 {
+            let lift = step as f32 / 20.0;
+            let now = [beam_presence(lift, 0, 3), beam_presence(lift, 1, 3), beam_presence(lift, 2, 3)];
+            assert!(now[0] >= now[1] && now[1] >= now[2], "order at lift {lift}: {now:?}");
+            for group in 0..3 {
+                assert!(now[group] >= last[group] - 1e-6, "group {group} dimmed as the music grew");
+            }
+            last = now;
+        }
+        // The last group is still out when the second is fully in.
+        assert_eq!(beam_presence(0.60, 1, 3), 1.0);
+        assert!(beam_presence(0.60, 2, 3) < 0.25);
+        // A rig with one group of beams never goes dark on dynamics alone.
+        assert!(beam_presence(0.0, 0, 1) > 0.3);
+    }
+
+    #[test]
+    fn dynamics_only_ever_takes_away() {
+        let open = CueSnapshot::default();
+        let settled = CueSnapshot { dynamics: 0.2, ..CueSnapshot::default() };
+        for kind in [
+            StageVisualKind::Wash,
+            StageVisualKind::LedPanel,
+            StageVisualKind::Beam,
+            StageVisualKind::Gobo,
+            StageVisualKind::Laser,
+            StageVisualKind::Strobe,
+        ] {
+            for group in 0..3 {
+                assert_eq!(dynamics_dimmer_scale(&open, kind, group, 3), 1.0, "{kind:?} at full weight");
+                let s = dynamics_dimmer_scale(&settled, kind, group, 3);
+                assert!((0.0..=1.0).contains(&s), "{kind:?} settled to {s}");
+            }
+        }
+        assert!((dynamics_dimmer_scale(&settled, StageVisualKind::LedPanel, 0, 3) - SETTLED_BODY).abs() < 1e-6);
+        // Lasers and strobes are not dimmed here: the show brain closes
+        // their lanes outright in a low passage.
+        assert_eq!(dynamics_dimmer_scale(&settled, StageVisualKind::Laser, 0, 3), 1.0);
+        assert_eq!(dynamics_motion_scale(&open), 1.0);
+        assert!((dynamics_motion_scale(&settled) - SETTLED_MOTION).abs() < 1e-6);
     }
 }

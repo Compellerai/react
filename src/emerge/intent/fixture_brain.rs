@@ -110,6 +110,11 @@ pub struct ArcSignals {
     /// softens mover depth here even though the grid persists. 1.0 = full
     /// license (the Default, so un-stamped tests keep classic behavior).
     pub intensity_license: f32,
+    /// Dynamics 0..1 from the show brain: how big the passage is on the set's
+    /// own scale (see `cue::dynamics`). The arc classifier uses it to tell a
+    /// real peak from a swell inside a low passage. 1.0 = full (the Default,
+    /// so un-stamped tests keep classic behavior).
+    pub dynamics: f32,
 }
 
 impl Default for ArcSignals {
@@ -123,6 +128,7 @@ impl Default for ArcSignals {
             musical_cooldown_bar_lock: 0.0,
             tension_plateau_s: 0.0,
             intensity_license: 1.0,
+            dynamics: 1.0,
         }
     }
 }
@@ -297,6 +303,12 @@ impl CueLaneIntent {
     }
 }
 
+/// Dynamics a sustained peak needs: everything in, on the set's own scale.
+pub(crate) const PEAK_DYNAMICS_MIN: f32 = 0.82;
+/// Dynamics under which a passage is a breakdown whatever its relative energy
+/// says: the low end is out.
+pub(crate) const LOW_DYNAMICS_MAX: f32 = 0.38;
+
 #[derive(Default)]
 pub struct FixtureBrain;
 
@@ -394,10 +406,18 @@ impl FixtureBrain {
             return ArcState::Buildup;
         }
 
-        if cue.energy > 0.82 && metrics.beat_confidence > 0.65 {
+        // `cue.energy` is renormalized every few seconds, so on its own it
+        // calls a peak on any swell and lets a long breakdown drift back up to
+        // a groove. Dynamics is measured against the set's own loudest
+        // passage: a peak has to be big on that scale too, and a passage that
+        // is low on it is a breakdown however long it has lasted.
+        if cue.energy > 0.82
+            && metrics.beat_confidence > 0.65
+            && signals.dynamics >= PEAK_DYNAMICS_MIN
+        {
             return ArcState::SustainPeak;
         }
-        if cue.energy < 0.16 {
+        if cue.energy < 0.16 || signals.dynamics < LOW_DYNAMICS_MAX {
             return ArcState::Breakdown;
         }
         if cue.energy < 0.34 {
@@ -882,6 +902,7 @@ mod tests {
                 musical_cooldown_bar_lock: 0.0,
                 tension_plateau_s: 0.0,
                 intensity_license: 1.0,
+                dynamics: 1.0,
             },
         );
 
@@ -903,6 +924,7 @@ mod tests {
             musical_cooldown_bar_lock: 0.0,
             tension_plateau_s: 0.0,
             intensity_license: 1.0,
+            dynamics: 1.0,
         };
         let phase_tail =
             PhaseState { beat: 0.5, bar: 0.7, phrase: 0.9, phrase_count: 0, beats_abs: 0.0 };
@@ -1166,5 +1188,36 @@ mod tests {
         assert_eq!(intent.priority, CuePriority::PhraseIntense);
         assert!(intent.musical_cooldown_ms >= 45000);
         assert!(intent.safety_max_duty_cycle <= 0.03);
+    }
+
+    // ── Dynamics in the arc ─────────────────────────────────────────────────
+
+    fn arc_at(energy: f32, dynamics: f32) -> ArcState {
+        let cue = CueSnapshot { energy, ..Default::default() };
+        let metrics = LightingMetrics { energy, raw_energy: 0.01, beat_confidence: 0.9, ..Default::default() };
+        FixtureBrain.detect_arc_state(
+            &cue,
+            &metrics,
+            PhaseState::default(),
+            ArcSignals { dynamics, ..ArcSignals::default() },
+        )
+    }
+
+    #[test]
+    fn a_swell_inside_a_low_passage_is_not_a_peak() {
+        // Relative energy is renormalized every few seconds: a build, or a
+        // vocal coming in over pads, reads as hot as a drop does.
+        assert_eq!(arc_at(0.92, 1.0), ArcState::SustainPeak);
+        assert_eq!(arc_at(0.92, 0.60), ArcState::Groove, "drums-and-tops is a groove, not a peak");
+        assert_eq!(arc_at(0.92, 0.30), ArcState::Breakdown, "…and with the low end out it is a breakdown");
+    }
+
+    #[test]
+    fn a_low_passage_is_a_breakdown_however_long_it_has_lasted() {
+        // A minute in, the adaptive energy has drifted back to a "groove".
+        assert_eq!(arc_at(0.55, 1.0), ArcState::Groove);
+        assert_eq!(arc_at(0.55, 0.26), ArcState::Breakdown);
+        // Silence is still silence.
+        assert_eq!(arc_at(0.0, 0.0), ArcState::Silence);
     }
 }

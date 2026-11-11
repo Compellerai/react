@@ -4648,6 +4648,7 @@ impl eframe::App for CompellerApp {
                                         auto_blinder_active: osc_ui.auto_blinder_active,
                                         macro_phase: osc_ui.macro_phase,
                                         resolved_style: self.dmx_manager.effective_lighting_style(),
+                                        dynamics: self.dmx_manager.dynamics(),
                                         trigger_fog_held: osc_ui.trigger_fog_held,
                                         trigger_fog_latched: osc_ui.trigger_fog_latched,
                                         trigger_uv_held: osc_ui.trigger_uv_held,
@@ -5995,6 +5996,7 @@ impl eframe::App for CompellerApp {
                             show_clock,
                             arc_state: self.dmx_manager.current_arc(),
                             intensity_license: self.dmx_manager.intensity_license(),
+                            dynamics: self.dmx_manager.dynamics(),
                             effective_style: self.dmx_manager.effective_lighting_style(),
                             // The "Dom" checkbox governs the rig colour too:
                             // checked = dominant pitch, unchecked = all-notes blend.
@@ -7154,6 +7156,10 @@ pub struct OscState {
     /// the Auto resolver's live flip) — the STYLE dropdown displays this so
     /// the operator can watch Auto move between Chill/Energetic/Banger.
     pub resolved_style: crate::emerge::LightingStyle,
+    /// Show-brain dynamics 0..1: how big the passage is on the set's own
+    /// scale. Shown beside the STYLE dropdown so the operator can see what
+    /// the rig is settling to.
+    pub dynamics: f32,
     /// Manual fog button held
     pub trigger_fog_held: bool,
     /// Fog latch — when on, fog stays running regardless of `trigger_fog_held`.
