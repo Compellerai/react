@@ -106,7 +106,7 @@ parking_lot = "0.12"
 tempfile = "3"
 
 # Database for persistent app state
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.42", features = ["bundled"] }
 
 # Fuzzy search for preset filtering
 fuzzy-matcher = "0.3"
@@ -119,6 +119,11 @@ fs2 = "0.4"
 
 # HTTP client for video sync
 ureq = { version = "2.10", features = ["json"] }
+
+# Not used directly. `url` (through ureq and egui's link opening) reaches `idna`,
+# whose default Unicode back end is ICU4X: some twenty extra crates and their
+# data tables. Holding the adapter at 1.1 selects the smaller unicode-rs back end.
+idna_adapter = "=1.1.0"
 
 # SHA-256 checksums for upload verification
 sha2 = "0.10"
@@ -250,7 +255,5 @@ long_description = "REACT by Compeller.ai"
 copyright = "2026 Compeller.ai"
 osx_minimum_system_version = "12.0"
 
-# Patch url crate to avoid ICU4X bloat
 [patch.crates-io]
-url = { git = "https://github.com/servo/rust-url", tag = "v2.5.2" }
 projectm-sys = { path = "deps/projectm-sys" }

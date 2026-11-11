@@ -4446,7 +4446,7 @@ impl Database {
         conn.execute(
             "INSERT INTO recording_sessions (session_id, output_dir, segment_duration_ms, width, height, fps, status)
              VALUES (?, ?, ?, ?, ?, ?, 'active')",
-            params![session_id, output_dir, config.segment_duration_ms, config.width, config.height, config.fps],
+            params![session_id, output_dir, config.segment_duration_ms as i64, config.width, config.height, config.fps],
         )?;
         log::info!("[DB] Created recording session: {}", session_id);
         Ok(())
@@ -4473,11 +4473,11 @@ impl Database {
                  video_frames = ?, audio_samples = ?, updated_at = strftime('%s', 'now')
              WHERE session_id = ? AND segment_index = ?",
             params![
-                metadata.duration_ms,
+                metadata.duration_ms as i64,
                 metadata.last_pts_ns as i64,
                 metadata.file_size_bytes as i64,
-                metadata.video_frames,
-                metadata.audio_samples,
+                metadata.video_frames as i64,
+                metadata.audio_samples as i64,
                 session_id,
                 segment_index
             ],
@@ -4920,5 +4920,73 @@ mod tests {
             .local_active_cues_for_promote(7)
             .iter()
             .any(|(lid, _, promoted)| lid == "Lp" && promoted.as_deref() == Some("server-xyz")));
+    }
+
+    /// The app's own schema on an in-memory database, then one recorded segment
+    /// through the crash-recovery journal. Every statement in `init_schema`
+    /// runs against the bundled SQLite, so a statement a newer SQLite or
+    /// rusqlite rejects fails here instead of at the next launch.
+    #[test]
+    fn a_recorded_segment_round_trips_through_the_real_schema() {
+        let conn = Connection::open_in_memory().unwrap();
+        let db = Database { conn: Arc::new(Mutex::new(conn)) };
+        db.init_schema().unwrap();
+        // A second pass is what every launch after the first one does.
+        db.init_schema().unwrap();
+
+        let config = RecordingSessionConfig {
+            segment_duration_ms: 30_000,
+            width: 1920,
+            height: 1080,
+            fps: 60,
+        };
+        db.create_recording_session("session-1", "/recordings/out", &config).unwrap();
+        db.begin_segment("session-1", 0, "segment-0.tmp", 1_000).unwrap();
+
+        // Sizes past 32 bits: a long take's byte count and timestamps are.
+        let metadata = SegmentMetadata {
+            duration_ms: 29_970,
+            first_pts_ns: 1_000,
+            last_pts_ns: 29_970_001_000,
+            file_size_bytes: 5_000_000_000,
+            video_frames: 1_798,
+            audio_samples: 1_438_560,
+        };
+        db.finalize_segment("session-1", 0, &metadata).unwrap();
+        assert!(
+            db.get_committed_segments("session-1").is_empty(),
+            "a finalized segment is not yet safe to recover"
+        );
+        db.commit_segment("session-1", 0, "segment-0.mp4").unwrap();
+
+        let segments = db.get_committed_segments("session-1");
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].index, 0);
+        assert_eq!(segments[0].path, std::path::PathBuf::from("segment-0.mp4"));
+        assert_eq!(segments[0].duration_ms, 29_970);
+        assert_eq!(segments[0].first_pts_ns, 1_000);
+        assert_eq!(segments[0].last_pts_ns, 29_970_001_000);
+        assert_eq!(segments[0].file_size_bytes, 5_000_000_000);
+
+        let (video_frames, audio_samples): (i64, i64) = db
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT video_frames, audio_samples FROM segment_journal WHERE session_id = ?",
+                ["session-1"],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((video_frames, audio_samples), (1_798, 1_438_560));
+
+        // Still 'active' is how a session that never stopped looks after a crash.
+        let crashed = db.get_crashed_sessions();
+        assert_eq!(crashed.len(), 1);
+        assert_eq!(crashed[0].segment_duration_ms, 30_000);
+        assert_eq!((crashed[0].width, crashed[0].height, crashed[0].fps), (1920, 1080, 60));
+        assert_eq!(crashed[0].total_segments, 1);
+        assert_eq!(crashed[0].total_duration_ms, 29_970);
+        assert_eq!(crashed[0].recovered_duration_ms(), 29_970);
     }
 }
