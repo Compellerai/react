@@ -1,15 +1,29 @@
 [package]
 name = "compeller-react"
 version = "1.0.0"
-description = "REACT by Compeller.ai - Audio-Reactive Visuals"
+description = "REACT by Compeller.ai: native macOS app for real-time audio-reactive visuals, DMX/Hue/WLED lighting, NDI output and live streaming"
 authors = ["Compeller.ai"]
 license = "Apache-2.0"
 repository = "https://github.com/Compellerai/react"
 homepage = "https://compeller.ai"
 readme = "README.md"
+keywords = ["audio-reactive", "visuals", "dmx", "lighting", "dj"]
+categories = ["multimedia", "multimedia::audio", "multimedia::video", "visualization"]
 edition = "2021"
 rust-version = "1.75.0"
-publish = false  # desktop application, not a crates.io library
+# The crate is the app's source. Presets, 3D models, detector models and the
+# build and packaging scripts stay in the repository: with them the archive is
+# twice the size crates.io accepts.
+include = [
+    "/src/",
+    "/assets/",
+    "/libs/",
+    "/build.rs",
+    "/README.md",
+    "/LICENSE",
+    "/NOTICE",
+    "/THIRD-PARTY-NOTICES.md",
+]
 
 [[bin]]
 name = "compeller-react"

@@ -2,6 +2,7 @@
 
 **Real-time, audio-reactive visuals, lighting and streaming for live performance — built to empower musicians and venues.**
 
+[![Crates.io](https://img.shields.io/crates/v/compeller-react.svg)](https://crates.io/crates/compeller-react)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 REACT is a native macOS desktop application written in Rust (egui + OpenGL/Metal).
@@ -22,6 +23,20 @@ cd react
 
 The first build compiles every dependency and takes a few minutes. macOS will
 ask for Screen Recording permission; REACT needs it to capture system audio.
+
+### On crates.io
+
+[`compeller-react`](https://crates.io/crates/compeller-react) on crates.io is
+the application source: the code, the built-in fixture profiles and the
+projectM libraries. The Milkdrop presets, 3D models and detector models are too
+large for a crate and live in this repository, so to run REACT, clone it as
+shown above.
+
+Crates that came out of building REACT, also on crates.io:
+[`prodjlink-rs`](https://crates.io/crates/prodjlink-rs) (Pioneer/AlphaTheta
+Pro DJ Link), [`ola-rs`](https://crates.io/crates/ola-rs) (Open Lighting
+Architecture DMX) and [`link-bpm-rs`](https://crates.io/crates/link-bpm-rs)
+(Ableton Link tempo).
 
 ## Contents
 
