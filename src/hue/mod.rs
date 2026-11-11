@@ -429,6 +429,30 @@ pub struct CueSnapshot {
     pub chord_prl_move: u8,
     /// Decaying P/R/L accent envelope (0-1).
     pub chord_prl_env: f32,
+    /// Root pitch class (0-11) of the last committed chord — held through a
+    /// no-chord gap. Only meaningful while `chord_quality != 0` (or just after).
+    pub chord_root: u8,
+    /// Accent envelope (0-1) for ANY chord-to-chord change — the everyday
+    /// I→IV / V→I moves the P/R/L envelope ignores. Drives the mover throw and
+    /// the colour bloom.
+    pub chord_change_env: f32,
+    /// Circle-of-fifths distance the root travelled at the last change (0-6):
+    /// harmonic distance, so a reaction can be sized to the move.
+    pub chord_root_motion: u8,
+    /// Side of the circle the root moved to: +1 sharpward, -1 flatward, 0 none.
+    pub chord_root_dir: i8,
+    /// Harmonic rhythm (0-1): how busy the chord changes are. Sets the pace of
+    /// the mover figures.
+    pub harmonic_rhythm: f32,
+    /// Harmonic position on the circle of fifths as a point in the unit disc
+    /// (angle = key area, radius = how committed). Movers lean toward it.
+    pub tonnetz_x: f32,
+    pub tonnetz_y: f32,
+    /// Mover choreography for this frame (figure crossfade + harmonic
+    /// steering), stamped by the DMX manager's `MovementDirector`. The default
+    /// is the legacy sweep with no steering, so any path without a director
+    /// (Hue/WLED/OSC snapshots, tests) moves exactly as before.
+    pub movement: crate::emerge::MovementFrame,
 
     // === COLLATZ STATE (from Mythos engine, available to all lighting outputs) ===
     /// Collatz heat (0-1): accumulated instability
@@ -567,6 +591,14 @@ impl CueSnapshot {
             chord_quality: 0,
             chord_prl_move: 0,
             chord_prl_env: 0.0,
+            chord_root: 0,
+            chord_change_env: 0.0,
+            chord_root_motion: 0,
+            chord_root_dir: 0,
+            harmonic_rhythm: 0.0,
+            tonnetz_x: 0.0,
+            tonnetz_y: 0.0,
+            movement: crate::emerge::MovementFrame::default(),
             // Collatz fields default to 0; populated by OSC thread from LightingMetrics
             collatz_heat: 0.0,
             collatz_phase: 0.0,
@@ -651,6 +683,14 @@ impl Default for CueSnapshot {
             chord_quality: 0,
             chord_prl_move: 0,
             chord_prl_env: 0.0,
+            chord_root: 0,
+            chord_change_env: 0.0,
+            chord_root_motion: 0,
+            chord_root_dir: 0,
+            harmonic_rhythm: 0.0,
+            tonnetz_x: 0.0,
+            tonnetz_y: 0.0,
+            movement: crate::emerge::MovementFrame::default(),
             collatz_heat: 0.0,
             collatz_phase: 0.0,
             collatz_intensity: 0.0,

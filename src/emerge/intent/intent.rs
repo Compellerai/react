@@ -4,6 +4,7 @@
 //! are an output encoding, not the lighting model. This module keeps one
 //! per-frame, oscillator-driven fixture state between CueSnapshot and DMX.
 
+use super::movement::{MotionContext, MoverSlot};
 use super::oscillator::{
     add_bipolar, OscillatorBinding, OscillatorFrameSnapshot,
     OscillatorInterval, OscillatorShape,
@@ -35,6 +36,16 @@ pub struct FixtureIntentState {
     pub gobo_rotation: f32,
     pub prism: f32,
     pub laser_macro: u8,
+    /// The hue (0-1) a colour-WHEEL fixture is asking for — the same pitch
+    /// anchor the RGB fixtures colour from. `color_wheel` above is only a
+    /// formula byte; when the fixture's profile carries a real slot table the
+    /// DMX layer picks the slot nearest this hue instead (see
+    /// `dmx::mapping::refine_with_profile`), so a wheel lands on an actual gel
+    /// in the show's colour rather than wherever the formula falls.
+    pub wheel_hue: f32,
+    /// The colour of the wheel slot the profile resolved, when it did — lets
+    /// the preview show the gel the rig is really on.
+    pub wheel_rgb: Option<[f32; 3]>,
 }
 
 // ── EALP B1: journey-phase lighting macro ───────────────────────────────────
@@ -255,6 +266,36 @@ fn tonnetz_motion_punch(snapshot: &CueSnapshot) -> f32 {
     1.0 + tonnetz_surprise(snapshot) * TONNETZ_MOTION_PUNCH
 }
 
+// ── Chord-change accents: the progression itself moves the rig ───────────────
+// The P/R/L kick above only fires on three special chord moves. A progression
+// is mostly the plain ones (I→IV, V→I, ii→V), so every committed chord change
+// also (a) blooms brightness for a moment and (b) nudges hue toward the side of
+// the circle of fifths the root moved to, by an amount sized to how far it
+// went: a fifth is a shimmer, a tritone leap is a visible swing. Both ride the
+// tracker's self-decaying `chord_change_env` and are gated by coherence +
+// loudness, so noise and quiet gaps do nothing. All no-op at env 0.
+const CHORD_HUE_KICK_BASE: f32 = 0.02; // hue nudge for a same-root / one-fifth change
+const CHORD_HUE_KICK_PER_STEP: f32 = 0.012; // extra per circle-of-fifths step travelled
+const CHORD_BLOOM: f32 = 0.10; // brightness lift at the moment of a change
+const CHORD_DIMMER_BLOOM: f32 = 0.12; // the same moment on a beam's dimmer
+
+/// How audible + coherent the chord change is (0-1): the envelope, gated so it
+/// only speaks when there is real harmony at a real level.
+fn chord_accent(snapshot: &CueSnapshot) -> f32 {
+    snapshot.chord_change_env.clamp(0.0, 1.0)
+        * snapshot.trust.clamp(0.0, 1.0)
+        * snapshot.energy_slow.clamp(0.0, 1.0)
+}
+
+/// Signed hue nudge on a chord change: sharpward moves one way round the
+/// colour wheel, flatward the other, further for a further root move.
+fn chord_hue_kick(snapshot: &CueSnapshot) -> f32 {
+    let side = if snapshot.chord_root_dir < 0 { -1.0 } else { 1.0 };
+    let reach = CHORD_HUE_KICK_BASE
+        + CHORD_HUE_KICK_PER_STEP * snapshot.chord_root_motion.min(6) as f32;
+    side * reach * chord_accent(snapshot)
+}
+
 /// `mover_ordinal` ranks this fixture among the Accent (mover) fixtures by DMX
 /// address (0,1,2,…) and `mover_count` is how many there are. The heads land on
 /// opposite harmonic ports (B3) and their sweep phase is grouped by symmetry (B4)
@@ -268,6 +309,25 @@ pub fn render_fixture_intent(
     gate: Option<&ShowBrainFrame>,
     mover_ordinal: usize,
     mover_count: usize,
+) -> FixtureIntentState {
+    render_fixture_intent_aimed(snapshot, fixture, osc, gate, mover_ordinal, mover_count, fixture.rotation.x)
+}
+
+/// [`render_fixture_intent`] with the mounting tilt the beam levels are measured
+/// from passed in, rather than read off the fixture.
+///
+/// Heads daisy-chained on one DMX address are sent one tilt value, so they have
+/// to work a level out from one aim. Each placed fixture has its own
+/// `rotation.x`; the rig renderer passes the aim the address shares, and the
+/// preview and the wire then agree on how far every head on it has travelled.
+pub fn render_fixture_intent_aimed(
+    snapshot: &CueSnapshot,
+    fixture: &FixturePatch,
+    osc: &OscillatorFrameSnapshot,
+    gate: Option<&ShowBrainFrame>,
+    mover_ordinal: usize,
+    mover_count: usize,
+    level_aim_deg: f32,
 ) -> FixtureIntentState {
     // COM-499: effect fixtures EMERGE with the music — energy-gated dimmer + a
     // static-band colour + a music-driven gobo spin — instead of sitting always-on.
@@ -283,7 +343,7 @@ pub fn render_fixture_intent(
         },
         strobe: strobe_for_fixture(snapshot, fixture.role, fixture.visual_kind, osc),
         pan: pan_for_fixture(snapshot, fixture.role, fixture.visual_kind, osc, mover_ordinal, mover_count),
-        tilt: tilt_for_fixture(snapshot, fixture.role, osc, mover_ordinal, mover_count),
+        tilt: tilt_for_fixture(snapshot, fixture.role, osc, mover_ordinal, mover_count, level_aim_deg),
         zoom: 0.35 + snapshot.energy * 0.45,
         focus: 0.45 + snapshot.stability * 0.35,
         color_wheel: if is_effect {
@@ -305,6 +365,7 @@ pub fn render_fixture_intent(
         // would fire while they're meant to be gone.
         prism: if snapshot.trigger_blinder || snapshot.drop_impact > 0.45 { 1.0 } else { 0.0 },
         laser_macro: laser_macro_for_fixture(snapshot, fixture.role, fixture.visual_kind, osc),
+        wheel_hue: wheel_hue_for_fixture(snapshot, mover_ordinal),
         ..Default::default()
     };
 
@@ -476,6 +537,11 @@ fn dimmer_for_fixture(
             // taste layer on top.)
             0.26 + snapshot.high * 0.30
                 + snapshot.dominant_env * 0.18 * snapshot.intensity_license.clamp(0.0, 1.0)
+                // A chord change breathes the accents up for a moment —
+                // licensed like the dominant flash, so an atonal wall whose
+                // "chords" are detector guesses doesn't blink.
+                + chord_accent(snapshot) * CHORD_DIMMER_BLOOM
+                    * snapshot.intensity_license.clamp(0.0, 1.0)
         }
         FixtureRole::Strobe => 0.18 + snapshot.drop_impact * 0.22,
     };
@@ -836,7 +902,27 @@ fn pan_for_fixture(
             let motion_full = journey_motion_scale(snapshot) * trust_motion(snapshot)
                 * tonnetz_motion_punch(snapshot);
             let motion = motion_full * license + SCAN_MOTION_FLOOR * (1.0 - license);
-            add_bipolar(center, sweep * (1.0 + 0.4 * snapshot.energy * license) * motion)
+            let legacy =
+                add_bipolar(center, sweep * (1.0 + 0.4 * snapshot.energy * license) * motion);
+            // Choreography: the movement director's figure (circle, fan,
+            // ballyhoo, …) crossfades in over this sweep, steered by the
+            // harmonic aim + chord throw. The figures orbit the SAME
+            // field-placed centre and inherit the SAME journey/coherence
+            // depth, so they are the sweep's siblings, not a second system.
+            // A default MovementFrame (no director) returns `legacy` exactly.
+            snapshot.movement.pan(
+                snapshot,
+                osc,
+                MotionContext {
+                    legacy,
+                    center: center_chase,
+                    motion: motion_full,
+                    slot: MoverSlot::new(mover_ordinal, mover_count, group_phase),
+                    // The beam level is a tilt matter; pan has no use for these.
+                    mount_tilt_deg: 0.0,
+                    rest: center_chase,
+                },
+            )
         }
         // A laser-macro fixture has no DMX pan channel, but the virtual stage
         // draws its fan as a horizontal sweep. Drive that sweep from the shared
@@ -863,6 +949,10 @@ fn tilt_for_fixture(
     osc: &OscillatorFrameSnapshot,
     mover_ordinal: usize,
     mover_count: usize,
+    // Where the head was aimed when it was rigged (the stage editor's mounting
+    // tilt, degrees from straight down) — the director's beam level is flown
+    // relative to it.
+    mount_tilt_deg: f32,
 ) -> f32 {
     match role {
         FixtureRole::Accent => {
@@ -904,15 +994,61 @@ fn tilt_for_fixture(
             let field_tilt = drift * osc.energy_env() * motion_full * license;
             let center_chase = 0.50 + snapshot.energy * 0.12 * license + field_tilt;
             let center = center_chase * license + SCAN_TILT * (1.0 - license);
-            add_bipolar(
+            let legacy = add_bipolar(
                 center,
                 sweep * (1.0 + 0.4 * snapshot.energy * license) * motion,
+            );
+            // Choreography (see pan_for_fixture): the director's figure rides
+            // the same chase centre + depth, lifted to the director's beam
+            // level (floor / crowd / sky); no director = `legacy` exactly.
+            let group_phase = mover_group_phase(mover_ordinal, mover_count, snapshot.symmetry);
+            snapshot.movement.tilt(
+                snapshot,
+                osc,
+                MotionContext {
+                    legacy,
+                    center: center_chase,
+                    motion: motion_full,
+                    slot: MoverSlot::new(mover_ordinal, mover_count, group_phase),
+                    mount_tilt_deg,
+                    // The mounting aim plus the harmonic drift, without the
+                    // energy lift: the director's levels take its place.
+                    rest: 0.50 + field_tilt,
+                },
             )
         }
         FixtureRole::Strobe => 0.5,
         FixtureRole::Wash => 0.5,
     }
 }
+
+/// The hue a colour-wheel head asks for (0-1).
+///
+/// Built only from DISCRETE inputs — the dominant pitch class, the look index
+/// and the head's group — never the continuous hue terms the RGB fixtures add:
+/// a mechanical wheel must not chatter between two gels as a hue hovers.
+///
+/// Group 0 takes the rig's anchor colour (pitch + the per-look rotation, the
+/// same base the washes use, so beams and washes belong to one palette). The
+/// other beam groups take the other notes of the triad built on it — group 1
+/// the fifth, group 2 the third, major or minor with the field — so the beam
+/// groups spell the harmony in colour instead of all sharing one gel. Hue is
+/// chromatic here (a semitone = 1/12 turn), matching the wash anchor.
+fn wheel_hue_for_fixture(snapshot: &CueSnapshot, mover_ordinal: usize) -> f32 {
+    let look_offset = (snapshot.look_index as f32 * 0.381_966).fract();
+    let anchor = (snapshot.dominant_pc % 12) as f32 / 12.0 + look_offset;
+    let voice = match mover_ordinal % 3 {
+        1 => 7.0 / 12.0,
+        2 if snapshot.major_smooth < WHEEL_MINOR_BELOW => 3.0 / 12.0,
+        2 => 4.0 / 12.0,
+        _ => 0.0,
+    };
+    (anchor + voice).rem_euclid(1.0)
+}
+
+/// Below this major-ness the third voice is the minor third. Off-centre so a
+/// neutral/ambiguous field stays on the major gel rather than hovering.
+const WHEEL_MINOR_BELOW: f32 = 0.45;
 
 fn color_wheel_for_fixture(snapshot: &CueSnapshot) -> u8 {
     ((snapshot.dominant_pc % 12) * 21).min(255)
@@ -1052,7 +1188,9 @@ fn color_for_fixture(
         + snapshot.tonnetz_hue * TONNETZ_HUE_DEPTH * snapshot.tonnetz_strength
         // EALP B5 all-in: a P/R/L chromatic-mediant hue jolt on a parsimonious chord
         // move (Parallel/Relative/Leading-tone), decaying via prl_env.
-        + prl_hue_kick(snapshot))
+        + prl_hue_kick(snapshot)
+        // Every chord change nudges hue toward the side the root moved to.
+        + chord_hue_kick(snapshot))
         .rem_euclid(1.0);
     // Slice-2 consonance saturation: dissonant/dense (low balance) toward the
     // per-kind ceiling, consonant eases off. Strobe (white) + Laser (full-sat)
@@ -1084,7 +1222,9 @@ fn color_for_fixture(
             sat *= 0.7 + 0.3 * snapshot.all_notes_sat;
         }
     }
-    let val = (0.35 + snapshot.energy * 0.42 + dimmer * 0.32 + snapshot.drop_impact * 0.12)
+    let val = (0.35 + snapshot.energy * 0.42 + dimmer * 0.32 + snapshot.drop_impact * 0.12
+        // A chord change blooms the colour body for a moment.
+        + chord_accent(snapshot) * CHORD_BLOOM)
         .clamp(0.0, 1.0);
     let (r, g, b) = hsv_to_rgb(hue, sat, val);
     let white = if snapshot.trigger_blinder || snapshot.auto_blinder_active {
@@ -1187,6 +1327,76 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chord_change_blooms_and_nudges_hue_by_harmonic_distance() {
+        let playing = CueSnapshot {
+            energy_slow: 0.8,
+            trust: 1.0,
+            intensity_license: 1.0,
+            ..CueSnapshot::default()
+        };
+        let held = playing.clone();
+        assert_eq!(chord_accent(&held), 0.0, "a held chord is no accent");
+        assert_eq!(chord_hue_kick(&held), 0.0);
+
+        let fifth_up = CueSnapshot {
+            chord_change_env: 1.0, chord_root_motion: 1, chord_root_dir: 1, ..playing.clone()
+        };
+        let fourth_up = CueSnapshot { chord_root_dir: -1, ..fifth_up.clone() };
+        let tritone = CueSnapshot { chord_root_motion: 6, chord_root_dir: 0, ..fifth_up.clone() };
+        assert!(chord_hue_kick(&fifth_up) > 0.0, "sharpward nudges one way");
+        assert!(chord_hue_kick(&fourth_up) < 0.0, "flatward the other");
+        assert!(
+            chord_hue_kick(&tritone).abs() > chord_hue_kick(&fifth_up).abs() * 2.0,
+            "a distant root move swings further"
+        );
+
+        // Gated: nothing in a quiet gap or an incoherent field.
+        let quiet = CueSnapshot { energy_slow: 0.0, ..fifth_up.clone() };
+        let noise = CueSnapshot { trust: 0.0, ..fifth_up.clone() };
+        assert_eq!(chord_accent(&quiet), 0.0);
+        assert_eq!(chord_accent(&noise), 0.0);
+
+        // Beam groups spell the triad in wheel hue: anchor, fifth, third — and
+        // the third follows the mode. Unvoiced groups (ordinal 0, 3, …) agree.
+        let c = CueSnapshot { dominant_pc: 0, major_smooth: 0.8, ..playing.clone() };
+        let turn = |a: f32, b: f32| (a - b).rem_euclid(1.0);
+        let root = wheel_hue_for_fixture(&c, 0);
+        assert!((turn(wheel_hue_for_fixture(&c, 1), root) - 7.0 / 12.0).abs() < 1e-5);
+        assert!((turn(wheel_hue_for_fixture(&c, 2), root) - 4.0 / 12.0).abs() < 1e-5);
+        let minor = CueSnapshot { major_smooth: 0.2, ..c.clone() };
+        assert!((turn(wheel_hue_for_fixture(&minor, 2), root) - 3.0 / 12.0).abs() < 1e-5);
+        assert_eq!(wheel_hue_for_fixture(&c, 3), root);
+        // …and the whole voicing rides the pitch anchor and the look rotation.
+        let g = CueSnapshot { dominant_pc: 7, ..c.clone() };
+        assert!((turn(wheel_hue_for_fixture(&g, 0), root) - 7.0 / 12.0).abs() < 1e-5);
+        let next_look = CueSnapshot { look_index: c.look_index + 1, ..c.clone() };
+        assert!(turn(wheel_hue_for_fixture(&next_look, 0), root) > 0.05);
+
+        // The bloom reaches the colour body and a beam's dimmer.
+        let osc = OscillatorFrameSnapshot::from_cue(&playing);
+        let body = |s: &CueSnapshot| {
+            let (r, g, b, _) =
+                color_for_fixture(s, FixtureRole::Wash, StageVisualKind::LedPanel, 0.3, 0.0, &osc);
+            r.max(g).max(b)
+        };
+        assert!(body(&fifth_up) > body(&held) + 0.05, "colour blooms on the change");
+        let beam = |s: &CueSnapshot| {
+            dimmer_for_fixture(s, FixtureRole::Accent, StageVisualKind::Beam, &osc)
+        };
+        assert!(
+            beam(&fifth_up) > beam(&held) + 0.02,
+            "beams breathe up on the change: {} vs {}",
+            beam(&fifth_up),
+            beam(&held)
+        );
+        // …but only where intensity is licensed: an unlicensed (atonal) passage
+        // keeps its beams level.
+        let unlicensed = CueSnapshot { intensity_license: 0.0, ..fifth_up.clone() };
+        let level = CueSnapshot { intensity_license: 0.0, ..held.clone() };
+        assert_eq!(beam(&unlicensed), beam(&level));
+    }
 
     #[test]
     fn chord_quality_and_prl_drive_temperature_and_hue_gated() {

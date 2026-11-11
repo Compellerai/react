@@ -1011,7 +1011,7 @@ fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
 }
 
 /// Local HSV->RGB (h/s/v in 0..1) for the `rainbow` gradient palette.
-fn hsv_rgb(h: f32, s: f32, v: f32) -> [f32; 3] {
+pub(crate) fn hsv_rgb(h: f32, s: f32, v: f32) -> [f32; 3] {
     let h = (h.rem_euclid(1.0) * 6.0).clamp(0.0, 5.999);
     let i = h.floor();
     let f = h - i;

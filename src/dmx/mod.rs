@@ -171,6 +171,12 @@ pub struct DmxManager {
     look_last_polarity: u8,
     look_last_phrase: i64,
     look_drop_armed: bool,
+    /// Mover choreography: picks the figure for the musical arc + tonality,
+    /// crossfades between figures, and tracks the harmonic steering (aim /
+    /// chord throw / tension gather). Ticked once per frame beside the look
+    /// rotation; its frame is stamped onto the snapshot so the wire and the
+    /// preview move identically.
+    movement: crate::emerge::MovementDirector,
     /// Integrated autopilot tightening-chase cycle and the show-clock beat it
     /// was last advanced at (`lighting_cue::advance_auto_chase`): the head
     /// must accelerate as tension shortens the period, and only an integrator
@@ -292,6 +298,7 @@ impl DmxManager {
             last_runnable: std::collections::HashMap::new(),
             local_cue_seq: 0,
             look_index: 0,
+            movement: crate::emerge::MovementDirector::new(),
             auto_chase_cycle: 0.0,
             auto_chase_last_beat: 0.0,
             look_last_polarity: 0,
@@ -1302,14 +1309,25 @@ impl DmxManager {
         );
         self.auto_chase_cycle = cycle;
         self.auto_chase_last_beat = last_beat;
-        // Shadow `snapshot` with a clone carrying the look_index + chase cycle,
-        // so the renderer + virtual-stage preview consume them with no further
-        // call-site plumbing.
+        // Mover choreography: one director decides the figure + harmonic
+        // steering for the whole rig this frame (arc from the show brain,
+        // chords from the snapshot, real frame dt for the crossfades).
+        let movement = self.movement.tick(
+            snapshot,
+            brain.arc_state,
+            brain.clock.beat,
+            brain.clock.tempo_bpm,
+            dt_s,
+        );
+        // Shadow `snapshot` with a clone carrying the look_index + chase cycle
+        // + movement frame, so the renderer + virtual-stage preview consume
+        // them with no further call-site plumbing.
         let snapshot = &{
             let mut s = snapshot.clone();
             s.look_index = self.look_index;
             s.auto_chase_cycle = self.auto_chase_cycle;
             s.strobe_on = strobe_on;
+            s.movement = movement;
             s
         };
 
@@ -1766,6 +1784,7 @@ mod tests {
             last_runnable: std::collections::HashMap::new(),
             local_cue_seq: 0,
             look_index: 0,
+            movement: crate::emerge::MovementDirector::new(),
             auto_chase_cycle: 0.0,
             auto_chase_last_beat: 0.0,
             look_last_polarity: 0,
@@ -1787,6 +1806,257 @@ mod tests {
             trusses: Vec::new(),
             venue: Some(VenueKind::WeddingRoom),
         }
+    }
+
+    /// A small rig patched the way the concert stages are: the real bundled
+    /// hardware profiles (8-cell panels in all three modes, both beam modes,
+    /// scan lasers) on top of the demo stage's fixtures and trusses.
+    fn concert_like_patch() -> DmxPatch {
+        const PANEL: &str = "0443a2c9-6ca7-486e-a573-3e7c8a3b4367";
+        const BEAM: &str = "01cc2583-e793-4efc-8b49-448ac7d4ab21";
+        const LASER: &str = "3f14db8f-d9ef-4955-9dbd-a6c2c4b31086";
+        let fx = |name: &str, profile: &str, mode: &str, kind: StageVisualKind, addr: u16, x: f32| {
+            let moving = kind == StageVisualKind::Beam;
+            FixturePatch {
+                id: name.to_string(),
+                name: name.to_string(),
+                universe: 0,
+                start_address: addr,
+                profile_id: profile.to_string(),
+                mode: mode.to_string(),
+                position: StageVec3 { x, y: 1.0, z: if moving { 11.0 } else { 8.0 } },
+                rotation: if moving {
+                    StageVec3 { x: 42.0, y: 86.0, z: 0.0 }
+                } else {
+                    StageVec3::zero()
+                },
+                scale: StageVec3 { x: 1.0, y: if moving { 15.0 } else { 1.0 }, z: 1.0 },
+                // SaaS authors nearly everything as Accent — panels included.
+                role: FixtureRole::Accent,
+                visual_kind: kind,
+                tags: vec![],
+                channels: ChannelMap::default(),
+                footprint: 0,
+                screen: None,
+            }
+        };
+        let mut patch = DmxPatch::demo_virtual_stage(0, 200);
+        patch.venue = Some(VenueKind::ConcertStage);
+        patch.fixtures.extend([
+            fx("panel-a", PANEL, "24 Channel", StageVisualKind::LedPanel, 1, -7.0),
+            fx("panel-b", PANEL, "24 Channel", StageVisualKind::LedPanel, 25, 7.0),
+            fx("panel-9", PANEL, "9 Channel", StageVisualKind::LedPanel, 49, -4.5),
+            fx("panel-3", PANEL, "3 Channel", StageVisualKind::LedPanel, 58, 4.5),
+            fx("beam-a", BEAM, "20 Channel", StageVisualKind::Beam, 61, -2.0),
+            fx("beam-b", BEAM, "20 Channel", StageVisualKind::Beam, 81, 2.0),
+            fx("beam-c", BEAM, "16 Channel", StageVisualKind::Beam, 101, 0.0),
+            fx("laser-a", LASER, "16 CHANNEL", StageVisualKind::Laser, 117, -6.0),
+            fx("laser-b", LASER, "16 CHANNEL", StageVisualKind::Laser, 133, 6.0),
+        ]);
+        patch
+    }
+
+    /// Frame `i` (30 fps) of a loud synthetic song: a chord change every 16
+    /// frames, alternating major/minor and polarity, a build that drops every
+    /// 32, and the manual strobe / blinder / UV triggers held for a few frames.
+    fn song_frame(i: u32) -> CueSnapshot {
+        let t = i as f32 / 30.0;
+        let bar = (i / 16) as u8;
+        let root = [0u8, 5, 7, 9, 2, 6][bar as usize % 6];
+        let step = i % 16;
+        CueSnapshot {
+            energy: 0.9,
+            energy_slow: 0.85,
+            reactivity: 1.0,
+            global_brightness: 1.0,
+            trust: 1.0,
+            intensity_license: 1.0,
+            bass: 0.7,
+            mid: 0.5,
+            high: 0.4,
+            kick: i % 8 == 0,
+            onset: i % 4 == 0,
+            dominant_pc: root,
+            chord_root: root,
+            chord_change_env: if step < 4 { 1.0 - step as f32 / 4.0 } else { 0.0 },
+            chord_root_motion: bar % 7,
+            chord_root_dir: if bar % 2 == 0 { 1 } else { -1 },
+            harmonic_rhythm: 0.5,
+            tonnetz_strength: 0.8,
+            tonnetz_hue: root as f32 / 12.0,
+            tonnetz_x: 0.6 * t.cos(),
+            tonnetz_y: 0.6 * t.sin(),
+            major_smooth: if bar % 2 == 0 { 0.8 } else { 0.2 },
+            stability: 0.5,
+            tension_bank: (i % 32) as f32 / 32.0,
+            drop_impact: if i % 32 == 31 { 1.0 } else { 0.0 },
+            polarity_quadrant: bar % 4,
+            trigger_strobe: (40..48).contains(&i),
+            trigger_blinder: (56..60).contains(&i),
+            trigger_uv: (64..68).contains(&i),
+            frame_time: t,
+            dt: 1.0 / 30.0,
+            frame_seq: i as u64,
+            ..CueSnapshot::default()
+        }
+    }
+
+    /// What picking a stage with the preview open does, minus the window and
+    /// the wire: apply the patch, render frames of a loud song with changing
+    /// harmony, and draw the whole stage through egui. Returns the most DMX
+    /// bytes lit in any frame. Test builds keep integer-overflow checks on,
+    /// exactly like a `cargo run` debug build, so arithmetic that only survives
+    /// by wrapping in a release build panics here instead of in front of the
+    /// operator.
+    fn draw_stage_headless(patch: DmxPatch, library: profiles::FixtureProfileLibrary) -> usize {
+        let mut m = venue_test_manager();
+        m.profile_library = library;
+        m.apply_patch(patch);
+        m.set_virtual_stage_enabled(true);
+        assert!(m.output.is_none(), "headless: nothing may reach a rig");
+
+        let ctx = egui::Context::default();
+        let mut view = crate::ui::VirtualStageView::default();
+        let pipeline: std::sync::Arc<parking_lot::Mutex<Option<crate::render::RenderPipeline>>> =
+            std::sync::Arc::new(parking_lot::Mutex::new(None));
+        let mut overrides = FixtureOverrides::default();
+        let mut venue = VenueKind::ConcertStage;
+        let library_profiles = m.profile_library().all_profiles();
+        let mut most_lit = 0;
+
+        for i in 0..96u32 {
+            let t = i as f32 / 30.0;
+            let step = i % 16;
+            let snapshot = song_frame(i);
+            // Walk every autopilot look, then the far end of the counter.
+            m.look_index = if i >= 90 { u32::MAX - (i - 90) } else { i / 6 };
+            m.update(&snapshot, None, &overrides, false);
+
+            let states = m.fixture_intents().to_vec();
+            let glyphs = m.glyph_fixtures().to_vec();
+            let parents = m.glyph_parents().to_vec();
+            let profiles = m.fixture_profiles().clone();
+            let frame = m.last_dmx_frame().cloned();
+            assert_eq!(states.len(), glyphs.len(), "one intent per drawn glyph");
+            assert!(!glyphs.is_empty(), "the preview has fixtures to draw");
+            if let Some(f) = &frame {
+                most_lit = most_lit.max(f.data.iter().filter(|&&b| b > 0).count());
+            }
+
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1440.0, 900.0),
+                )),
+                time: Some(t as f64),
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| {
+                view.show(
+                    ctx,
+                    crate::emerge::StageViewPresetKind::Foh,
+                    1.0,
+                    0.0,
+                    0.0,
+                    &pipeline,
+                    m.fixture_patch_mut(),
+                    &mut overrides,
+                    &glyphs,
+                    &states,
+                    &parents,
+                    &profiles,
+                    &library_profiles,
+                    true,
+                    frame.as_ref(),
+                    step < 8,
+                    true,
+                    &mut venue,
+                    true,
+                );
+            });
+        }
+        most_lit
+    }
+
+    /// Regression: choosing a stage with lit 8-cell panels crashed a debug
+    /// build, because the panel's dot shimmer multiplied its way past
+    /// `u32::MAX` on the third cell.
+    #[test]
+    fn the_stage_preview_draws_a_lit_rig_without_panicking() {
+        let lit = draw_stage_headless(concert_like_patch(), profiles::FixtureProfileLibrary::bundled());
+        assert!(lit > 60, "the rig is actually lit while it is drawn: {lit} bytes");
+    }
+
+    /// Heads daisy-chained on one DMX address are sent one pan/tilt. However
+    /// each copy is placed on the stage, the preview has to draw every one of
+    /// them travelling exactly as far as that address is sent — the beam levels
+    /// once worked each copy out from its own placed aim, so the preview showed
+    /// several tilts where the rig could only ever get one.
+    #[test]
+    fn heads_sharing_an_address_are_drawn_as_far_as_they_are_sent() {
+        let mut patch = concert_like_patch();
+        // Like the concert stages: more copies hung on beam-a's address, and
+        // beam-c's address stood on the floor firing up — each copy placed at
+        // its own angle.
+        let copy = |patch: &mut DmxPatch, of: &str, name: &str, aim: f32, x: f32| {
+            let mut head = patch.fixtures.iter().find(|f| f.id == of).expect("source head").clone();
+            head.id = name.to_string();
+            head.name = name.to_string();
+            head.rotation.x = aim;
+            head.position.x = x;
+            patch.fixtures.push(head);
+        };
+        copy(&mut patch, "beam-a", "beam-a2", 15.0, -3.0);
+        copy(&mut patch, "beam-a", "beam-a3", 30.0, -1.0);
+        patch.fixtures.iter_mut().find(|f| f.id == "beam-c").expect("beam-c").rotation.x = 118.0;
+        copy(&mut patch, "beam-c", "beam-c2", 126.0, 1.0);
+        copy(&mut patch, "beam-c", "beam-c3", 122.0, -1.0);
+
+        let mut m = venue_test_manager();
+        m.profile_library = profiles::FixtureProfileLibrary::bundled();
+        m.apply_patch(patch);
+        m.set_virtual_stage_enabled(true);
+        assert!(m.output.is_none(), "headless: nothing may reach a rig");
+        let overrides = FixtureOverrides::default();
+
+        let (mut worst, mut furthest, mut heads) = (0.0f32, 0.0f32, 0usize);
+        let mut lowest_aerial = f32::MAX;
+        for i in 0..96u32 {
+            m.update(&song_frame(i), None, &overrides, false);
+            let frame = m.last_dmx_frame().expect("a rendered frame").clone();
+            for (fx, drawn) in m.glyph_fixtures().iter().zip(m.fixture_intents()) {
+                // The demo stage's own heads have no hardware profile, and
+                // so no 16-bit position to read back.
+                let Some(profile) = m.fixture_profiles().get(&fx.id) else { continue };
+                if fx.visual_kind != StageVisualKind::Beam {
+                    continue;
+                }
+                // Degrees from the head's own centre, off the 16-bit wire value.
+                let sent = |coarse: Option<u16>, axis: &str, travel_deg: f32| {
+                    let byte = |addr: u16| frame.data[addr as usize - 1] as u32;
+                    let fine = mapping::fine_channel(profile, fx, axis).expect("a fine channel");
+                    let v16 = byte(coarse.expect("a coarse channel")) << 8 | byte(fine);
+                    (v16 as f32 / 65535.0 - 0.5) * travel_deg
+                };
+                let sent_pan = sent(fx.channels.pan, "pan", mapping::HEAD_PAN_RANGE_DEG);
+                let sent_tilt = sent(fx.channels.tilt, "tilt", mapping::HEAD_TILT_RANGE_DEG);
+                // Degrees from the placed aim, as the preview draws it.
+                let drawn_pan = (drawn.pan - 0.5) * crate::emerge::MOVER_PAN_WINDOW_DEG;
+                let drawn_tilt = (drawn.tilt - 0.5) * crate::emerge::MOVER_TILT_WINDOW_DEG;
+                worst = worst.max((sent_pan - drawn_pan).abs()).max((sent_tilt - drawn_tilt).abs());
+                furthest = furthest.max(drawn_tilt.abs());
+                if fx.rotation.x > 100.0 {
+                    lowest_aerial = lowest_aerial.min(fx.rotation.x + drawn_tilt);
+                }
+                heads += 1;
+            }
+        }
+        assert_eq!(heads, 96 * 7, "every copy of every head was compared, every frame");
+        assert!(furthest > 20.0, "the heads actually went somewhere: {furthest} deg of tilt");
+        assert!(worst < 0.05, "a head was drawn {worst} deg away from what its address was sent");
+        // The copies firing up share one tilt too, so the horizon is kept by
+        // the one placed lowest and the rest ride above it.
+        assert!(lowest_aerial >= 89.9, "an up-firing copy was flown down to {lowest_aerial} deg");
     }
 
     #[test]

@@ -22,12 +22,15 @@ pub use harmony::{
     ZoneThresholds,
 };
 pub use intent::{
-    add_bipolar, add_clamped, bipolar_wave, render_fixture_intent, renders_as_galaxy_effect,
+    add_bipolar, add_clamped, bipolar_wave, render_fixture_intent, render_fixture_intent_aimed,
+    renders_as_galaxy_effect,
     segment_rgbw, ArcSignals, ArcState, CueLaneIntent, CuePriority, FixtureBrain,
     FixtureBrainContext, FixtureFamily, FixtureFamilyCapabilities, FixtureFrameContext,
     FixtureGenreProfile, FixtureIntentState, LfoBankConfig, LfoModulation, LfoTarget, LfoWaveform,
-    OscillatorBinding, OscillatorFrameSnapshot, OscillatorInterval, OscillatorShape, PhaseState,
-    ShowClockSnapshot, ShowClockSource, TopologyState,
+    MoveFigure, MoveLook, MovePosture, MovementDirector, MovementFrame, MoverSlot,
+    OscillatorBinding, MOVER_PAN_WINDOW_DEG, MOVER_TILT_WINDOW_DEG,
+    OscillatorFrameSnapshot, OscillatorInterval, OscillatorShape, PhaseState, ShowClockSnapshot,
+    ShowClockSource, TopologyState,
 };
 pub use cue::{
     apply_cue_bindings, family_for, link_clock, prolink_clock, ActiveCue, AutoBlinderPhase,

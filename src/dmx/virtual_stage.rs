@@ -5,10 +5,10 @@
 //! the lighting cue each frame and holds it for the egui renderer to draw.
 
 use crate::emerge::PhaseState;
-use crate::emerge::{render_fixture_intent, FixtureIntentState};
+use crate::emerge::{render_fixture_intent, render_fixture_intent_aimed, FixtureIntentState};
 use super::mapping::{
     apply_global_overrides, apply_per_fixture_overrides, bar_energy_gate, expand_sections,
-    is_gigbar_35, ProfileMap,
+    is_gigbar_35, refine_with_profile, MoverRanking, ProfileMap,
 };
 use crate::emerge::OscillatorFrameSnapshot;
 use crate::emerge::ShowBrainFrame;
@@ -131,16 +131,10 @@ impl VirtualStageBackend {
             None => OscillatorFrameSnapshot::from_cue(snapshot),
         };
         // Emerge field -> autonomous movers (preview parity with the DMX path):
-        // rank Accent movers by DMX address so the two heads cross on opposite
-        // harmonic ports on-screen exactly as they do on the wire.
-        let mut mover_addrs: Vec<u16> = self
-            .patch
-            .fixtures
-            .iter()
-            .filter(|f| matches!(f.role, FixtureRole::Accent))
-            .map(|f| f.start_address)
-            .collect();
-        mover_addrs.sort_unstable();
+        // the SAME ranking the wire uses, so the heads take the same ports,
+        // sweep groups and figure slots on-screen as they do on the rig, and
+        // heads sharing an address level from the one aim the wire uses.
+        let movers = MoverRanking::new(self.patch.fixtures.iter());
         // Same bar gate the wire applies (collapse the dense bar in quiet).
         // A held manual override (BLINDER/STROBE/UV) bypasses it exactly as the
         // wire does (mapping.rs render path) — the operator pressed the button,
@@ -209,11 +203,13 @@ impl VirtualStageBackend {
             let intent = if blackout {
                 FixtureIntentState::default()
             } else {
-                let mover_ordinal = mover_addrs
-                    .iter()
-                    .position(|&a| a == fixture.start_address)
-                    .unwrap_or(0);
-                let mut it = render_fixture_intent(snapshot, fixture, &osc, gate, mover_ordinal, mover_addrs.len());
+                let (mover_ordinal, level_aim) = movers.place(fixture);
+                let mut it = render_fixture_intent_aimed(
+                    snapshot, fixture, &osc, gate, mover_ordinal, movers.count(), level_aim,
+                );
+                // Same wheel resolution as the wire, so the preview shows the
+                // gel the rig is actually on.
+                refine_with_profile(&mut it, fixture, profiles.get(&fixture.id));
                 apply_global_overrides(&mut it, fixture, snapshot, true);
                 apply_per_fixture_overrides(&mut it, fixture, overrides, any_solo);
                 apply_uv_preview(&mut it);

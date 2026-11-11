@@ -138,7 +138,7 @@ impl FixtureProfileLibrary {
     /// overlay can add or edit but never RETIRE a bundled id — a profile deleted on
     /// the NAS keeps resolving from this snapshot until a rebuild; true retirement
     /// needs a NAS-side tombstone, not file absence.
-    fn bundled() -> Self {
+    pub(crate) fn bundled() -> Self {
         const BUNDLED: &[&str] = &[
             include_str!("../../assets/nas-fixture-profiles/chauvet-dj-obsession.json"),
             include_str!("../../assets/nas-fixture-profiles/chauvet-dj-scorpion-dual-rgb.json"),

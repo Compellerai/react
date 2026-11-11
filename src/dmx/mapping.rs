@@ -1,14 +1,18 @@
 use std::collections::HashMap;
 
 use crate::emerge::{FixtureFamily, PhaseState};
-use crate::emerge::{render_fixture_intent, segment_rgbw, FixtureIntentState};
+use crate::emerge::{
+    render_fixture_intent, render_fixture_intent_aimed, segment_rgbw, FixtureIntentState,
+};
 use crate::emerge::{apply_cue_bindings, ActiveCue, CueApplyReport};
 use crate::emerge::OscillatorFrameSnapshot;
 use crate::emerge::{family_for, ShowBrainFrame};
 use crate::emerge::contracts::{
-    segments_for_profile, ChannelMap, DmxFrame, DmxPatch, FixtureOverride, FixtureOverrides,
+    segments_for_profile, ChannelDefinition, ChannelDetail, ChannelMap, ChannelSlot, DmxAttribute,
+    DmxFrame, DmxPatch, FixtureHousing, FixtureKind, FixtureOverride, FixtureOverrides,
     FixturePatch, FixtureProfile, FixtureRole, SegmentPattern, StageVec3, StageVisualKind,
 };
+use crate::emerge::{MOVER_PAN_WINDOW_DEG, MOVER_TILT_WINDOW_DEG};
 use crate::hue::CueSnapshot;
 
 /// Resolved hardware profiles keyed by fixture id — lets the writer expand a
@@ -99,16 +103,12 @@ pub fn render_dmx_frame_at(
         .map(|b| b.clock.beat)
         .unwrap_or_else(|| snapshot.frame_time as f64 * 122.0 / 60.0);
 
-    // Emerge field -> autonomous movers: rank the Accent (mover) fixtures by DMX
-    // address so the two GigBAR heads land on opposite harmonic ports (ordinal 0
-    // -> port 0, ordinal 1 -> port 2) and counter-phase their sweep. Computed once
-    // over this universe before the fixture loop.
-    let mut mover_addrs: Vec<u16> = patch
-        .fixtures_for_universe(patch.universe)
-        .filter(|f| matches!(f.role, FixtureRole::Accent))
-        .map(|f| f.start_address)
-        .collect();
-    mover_addrs.sort_unstable();
+    // Emerge field -> autonomous movers: rank the moving fixtures by DMX
+    // address so neighbouring heads land on opposite harmonic ports (ordinal 0
+    // -> port 0, ordinal 1 -> port 2), counter-phase their sweep, and take
+    // their own place in a figure. Computed once over this universe before
+    // the fixture loop.
+    let movers = MoverRanking::new(patch.fixtures_for_universe(patch.universe));
 
     for fixture in patch.fixtures_for_universe(patch.universe) {
         // A Screen is a placeable video surface, not a light — it never emits
@@ -163,6 +163,7 @@ pub fn render_dmx_frame_at(
                     sec.mover_ordinal,
                     sec.mover_count,
                 );
+                scale_motion_to_window(&mut intent, &sec.fixture, None);
                 // No per-section profile (sections aren't pixel bars), so
                 // step_chase bindings simply report a capability miss.
                 let overlay =
@@ -224,11 +225,16 @@ pub fn render_dmx_frame_at(
             continue;
         }
 
-        let mover_ordinal = mover_addrs
-            .iter()
-            .position(|&a| a == fixture.start_address)
-            .unwrap_or(0);
-        let mut intent = render_fixture_intent(snapshot, fixture, &osc, gate, mover_ordinal, mover_addrs.len());
+        let (mover_ordinal, level_aim) = movers.place(fixture);
+        let mut intent = render_fixture_intent_aimed(
+            snapshot,
+            fixture,
+            &osc,
+            gate,
+            mover_ordinal,
+            movers.count(),
+            level_aim,
+        );
         // Profile (when resolved) is needed by step_chase bindings whose
         // `values_from` path pulls steps off the fixture's gobo/prism/etc
         // detail; passing `None` makes step_chase fall through to a
@@ -236,6 +242,13 @@ pub fn render_dmx_frame_at(
         // ONCE here and its cell count handed to `apply_cue_bindings`, which
         // previously re-derived it per segment binding per frame.
         let profile = profiles.get(&fixture.id);
+        // Land the colour wheel on a real gel from the profile's slot table
+        // (before the cue bindings, so a cue still has the last word).
+        refine_with_profile(&mut intent, fixture, profile);
+        // Bring the autopilot's pan/tilt down to the travel the choreography is
+        // written for (also before the cue bindings: a cue's own pan/tilt is an
+        // explicit DMX position and goes out as authored).
+        scale_motion_to_window(&mut intent, fixture, profile);
         let segments = profile
             .map(|p| segments_for_profile(p, fixture.start_address))
             .unwrap_or_default();
@@ -249,14 +262,359 @@ pub fn render_dmx_frame_at(
         // Per-fixture operator override runs LAST so a mute/solo wins over a
         // blinder white-flash and the intensity trim stacks under the master.
         apply_per_fixture_overrides(&mut intent, fixture, overrides, any_solo);
+        // Resting values the profile pins on channels nothing else drives (a
+        // beam's Focus, say) go down FIRST so every mapped slot still wins.
+        if let Some(p) = profile {
+            stamp_profile_statics(&mut frame, fixture, p);
+        }
         if segments.len() >= 2 {
             apply_segmented_fixture(&mut frame, fixture, intent, snapshot, &segments, overlay.segments.as_deref(), beats, overrides.get(&fixture.id), any_solo);
         } else {
-            apply_fixture_intent(&mut frame, fixture, intent, overlay.gobo_exact);
+            // A cue's exact step wins; otherwise the gobo slot resolves to a
+            // real wheel position when the profile lists them.
+            let gobo_exact = overlay
+                .gobo_exact
+                .or_else(|| profile.and_then(|p| profile_gobo_value(fixture, p, intent.gobo_slot)));
+            apply_fixture_intent(&mut frame, fixture, intent, gobo_exact);
+        }
+        // 16-bit pan/tilt where the fixture has fine channels — after the
+        // 8-bit write, replacing its coarse byte with the matching high byte.
+        if let Some(p) = profile {
+            apply_fine_motion(&mut frame, fixture, p, &intent);
         }
     }
 
     frame
+}
+
+/// The DMX addresses that move independently, in address order — the ranking
+/// behind each mover's ordinal (which harmonic port it rests on, which sweep
+/// group it joins, where it sits in a figure) — and the one mounting aim each
+/// address works its beam levels out from.
+///
+/// A mover is an `Accent` fixture that can actually move: it has a pan or a
+/// tilt channel. Role alone is not enough — SaaS authors nearly every fixture
+/// as `Accent`, so ranking by role counted LED panels as movers (the concert
+/// rig ranked 44 "movers" for four moving groups, scattering their phases and
+/// ports arbitrarily). Addresses are de-duplicated: fixtures daisy-chained on
+/// one address are one head as far as DMX is concerned, and counting each copy
+/// skews everyone else's spacing.
+///
+/// A fixture with NO channel map at all (a virtual-only stage fixture) still
+/// counts, so a preview-only rig keeps its heads spread.
+///
+/// The same "one head as far as DMX is concerned" holds for the beam levels.
+/// A level is an angle in the room (the horizon, the sky), so reaching it
+/// depends on where the head is aimed — but an address carries one tilt value,
+/// and each copy placed on it has its own `rotation.x`. Levelling every copy
+/// from its own aim gave the preview a different tilt per head while the rig
+/// got whichever copy was written last. The address therefore levels from one
+/// aim, and every head on it travels the same amount from its own placed spot
+/// — which is what the hardware does. That one aim is the LOWEST its copies
+/// are placed at: the limits a level keeps (the rake and the horizon for heads
+/// firing up) are then kept by the copy nearest to breaking them, and every
+/// other copy on the address sits above it.
+pub(crate) struct MoverRanking {
+    addrs: Vec<u16>,
+    aims: Vec<f32>,
+}
+
+impl MoverRanking {
+    pub(crate) fn new<'a>(fixtures: impl Iterator<Item = &'a FixturePatch>) -> Self {
+        let mut heads: Vec<(u16, f32)> = fixtures
+            .filter(|f| matches!(f.role, FixtureRole::Accent))
+            .filter(|f| {
+                f.channels.pan.is_some() || f.channels.tilt.is_some() || f.channels == ChannelMap::default()
+            })
+            .map(|f| (f.start_address, f.rotation.x))
+            .collect();
+        heads.sort_unstable_by_key(|&(addr, _)| addr);
+        let mut addrs = Vec::new();
+        let mut aims = Vec::new();
+        for group in heads.chunk_by(|a, b| a.0 == b.0) {
+            let lowest = group.iter().map(|&(_, aim)| aim).filter(|a| a.is_finite()).fold(f32::INFINITY, f32::min);
+            addrs.push(group[0].0);
+            aims.push(if lowest.is_finite() { lowest } else { 0.0 });
+        }
+        Self { addrs, aims }
+    }
+
+    /// How many addresses move independently.
+    pub(crate) fn count(&self) -> usize {
+        self.addrs.len()
+    }
+
+    /// This fixture's ordinal among the moving addresses and the aim its
+    /// address levels from. A fixture that isn't ranked gets ordinal 0 and its
+    /// own aim, which only the mover lanes read.
+    pub(crate) fn place(&self, fixture: &FixturePatch) -> (usize, f32) {
+        match self.addrs.binary_search(&fixture.start_address) {
+            Ok(i) => (i, self.aims[i]),
+            Err(_) => (0, fixture.rotation.x),
+        }
+    }
+}
+
+// ── Profile-accurate wire values ─────────────────────────────────────────────
+// The intent layer speaks in abstract terms (a hue, a gobo slot 0-7, a 0-1 pan)
+// and the generic writer turns those into bytes by formula. A formula only
+// lands on a real wheel position by luck: the 7R Beam's 15 gels are each 4 DMX
+// wide on a ~8.5-step pitch, with split-colour gaps between them and nothing
+// defined above 123, so `pitch × 21` parked five of the twelve pitch classes
+// between gels or off the end of the table; `gobo_slot × 32` put slots 3-7 past
+// its last gobo (71); its Focus rests at 127 in the profile but was never sent;
+// and its fine pan/tilt channels sat at 0, quantising every slow move to 8-bit
+// steps. Where the fixture's resolved profile carries the real table, use it.
+// A fixture with no profile (or a profile with no table) keeps the formula.
+
+/// A wheel slot needs at least this much colour to count as a gel: Open, CTO
+/// and pale tints are a "white", not a hue the harmony can ask for.
+const WHEEL_MIN_SAT: f32 = 0.35;
+const WHEEL_MIN_VAL: f32 = 0.20;
+/// Between two gels at (near) the same hue distance, prefer the more vivid —
+/// expressed in turns of hue, so it only ever breaks near-ties.
+const WHEEL_VIVID_BIAS: f32 = 0.03;
+
+/// The profile channel sitting at absolute DMX address `abs` on this fixture.
+fn profile_channel_at<'a>(
+    profile: &'a FixtureProfile,
+    fixture: &FixturePatch,
+    abs: u16,
+) -> Option<&'a ChannelDefinition> {
+    let offset = abs.checked_sub(fixture.start_address)?.checked_add(1)?;
+    profile.channels.iter().find(|c| c.channel_offset == offset)
+}
+
+/// The wire byte that selects a wheel/gobo slot: the middle of its DMX range
+/// (the safest landing — edges can read as the neighbour or a split), or its
+/// single `value` when the profile gives no range.
+fn slot_byte(slot: &ChannelSlot) -> u8 {
+    match (slot.low_value, slot.high_value) {
+        (Some(lo), Some(hi)) => ((lo + hi) * 0.5).round().clamp(0.0, 255.0) as u8,
+        _ => slot.value,
+    }
+}
+
+/// (hue 0-1, saturation, value) of a 0-1 RGB triple.
+fn rgb_hsv(rgb: [f32; 3]) -> (f32, f32, f32) {
+    let [r, g, b] = rgb;
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    if max <= 0.0 || delta <= 1e-6 {
+        return (0.0, 0.0, max);
+    }
+    let hue = if max == r {
+        ((g - b) / delta).rem_euclid(6.0)
+    } else if max == g {
+        (b - r) / delta + 2.0
+    } else {
+        (r - g) / delta + 4.0
+    } / 6.0;
+    (hue, delta / max, max)
+}
+
+/// The gel on a colour wheel nearest to `hue` — `(wire byte, the gel's RGB)`.
+/// `None` when the table has no real colours (an all-white effect wheel).
+fn nearest_wheel_slot(slots: &[ChannelSlot], hue: f32) -> Option<(u8, [f32; 3])> {
+    let mut best: Option<(f32, u8, [f32; 3])> = None;
+    for slot in slots.iter().filter(|s| s.enabled) {
+        let Some(c) = slot.rgb else { continue };
+        let rgb = [c[0] as f32, c[1] as f32, c[2] as f32];
+        let (h, s, v) = rgb_hsv(rgb);
+        if s < WHEEL_MIN_SAT || v < WHEEL_MIN_VAL {
+            continue;
+        }
+        let d = (h - hue).rem_euclid(1.0);
+        let score = d.min(1.0 - d) + WHEEL_VIVID_BIAS * (1.0 - s * v);
+        if best.map_or(true, |(b, _, _)| score < b) {
+            best = Some((score, slot_byte(slot), rgb));
+        }
+    }
+    best.map(|(_, byte, rgb)| (byte, rgb))
+}
+
+/// Resolve the parts of an intent the fixture's profile can make exact. Today:
+/// the colour wheel lands on the real gel nearest the hue the intent asks for
+/// (and remembers that gel's colour, so the preview shows what the rig is on).
+///
+/// `pub(crate)` so the virtual-stage backend applies the identical refinement —
+/// the on-screen beam colour stays honest with the wire.
+pub(crate) fn refine_with_profile(
+    intent: &mut FixtureIntentState,
+    fixture: &FixturePatch,
+    profile: Option<&FixtureProfile>,
+) {
+    let Some(profile) = profile else { return };
+    let Some(addr) = fixture.channels.color_wheel else { return };
+    let Some(ChannelDetail::ColorWheel { slots, .. }) =
+        profile_channel_at(profile, fixture, addr).and_then(|c| c.detail.as_ref())
+    else {
+        return;
+    };
+    if let Some((byte, rgb)) = nearest_wheel_slot(slots, intent.wheel_hue) {
+        intent.color_wheel = byte;
+        intent.wheel_rgb = Some(rgb);
+    }
+}
+
+/// The 0-1 wire value that puts the gobo wheel on a real position for the
+/// intent's abstract slot (0-7), spreading the eight slots evenly across the
+/// wheel's enabled steps. `None` when the profile lists no steps.
+fn profile_gobo_value(fixture: &FixturePatch, profile: &FixtureProfile, slot: u8) -> Option<f32> {
+    let addr = fixture.channels.gobo_slot?;
+    let Some(ChannelDetail::Gobo { steps }) =
+        profile_channel_at(profile, fixture, addr).and_then(|c| c.detail.as_ref())
+    else {
+        return None;
+    };
+    let count = steps.iter().filter(|s| s.enabled).count();
+    if count == 0 {
+        return None;
+    }
+    let idx = (slot.min(7) as usize * count / 8).min(count - 1);
+    let step = steps.iter().filter(|s| s.enabled).nth(idx)?;
+    Some(slot_byte(step) as f32 / 255.0)
+}
+
+/// Write the resting value the profile pins on channels the intent never
+/// drives (attribute `Custom`: STATIC control channels and the like). Called
+/// before the intent write, so a mapped slot at the same address still wins.
+fn stamp_profile_statics(frame: &mut DmxFrame, fixture: &FixturePatch, profile: &FixtureProfile) {
+    for ch in &profile.channels {
+        if ch.default_value != 0 && matches!(ch.attribute, DmxAttribute::Custom(_)) {
+            let abs = fixture.start_address.saturating_add(ch.channel_offset.saturating_sub(1));
+            frame.set_channel(Some(abs), ch.default_value);
+        }
+    }
+}
+
+/// Case-insensitive ASCII substring test without allocating (render path).
+fn label_has(label: &str, needle: &str) -> bool {
+    label
+        .as_bytes()
+        .windows(needle.len())
+        .any(|w| w.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
+/// Absolute address of the fixture's fine (LSB) channel for `axis` ("pan" /
+/// "tilt"). Profiles don't type these — they arrive as `Custom("Pan Fine")` —
+/// so they are found by label.
+pub(crate) fn fine_channel(profile: &FixtureProfile, fixture: &FixturePatch, axis: &str) -> Option<u16> {
+    profile.channels.iter().find_map(|c| match &c.attribute {
+        DmxAttribute::Custom(label) if label_has(label, axis) && label_has(label, "fine") => {
+            Some(fixture.start_address.saturating_add(c.channel_offset.saturating_sub(1)))
+        }
+        _ => None,
+    })
+}
+
+/// Split a 0-1 position into its 16-bit (coarse, fine) byte pair.
+fn split_16bit(value: f32) -> (u8, u8) {
+    let v16 = (value.clamp(0.0, 1.0) * 65535.0).round() as u16;
+    ((v16 >> 8) as u8, (v16 & 0xff) as u8)
+}
+
+/// Drive pan/tilt at 16-bit resolution where the fixture has fine channels. A
+/// slow sweep over a 540° pan is ~2° per 8-bit step — visibly a staircase on a
+/// tight beam; the fine byte fills in the 256 positions between. Fixtures
+/// without a fine channel keep the plain 8-bit byte already written.
+fn apply_fine_motion(
+    frame: &mut DmxFrame,
+    fixture: &FixturePatch,
+    profile: &FixtureProfile,
+    intent: &FixtureIntentState,
+) {
+    for (axis, coarse, value) in
+        [("pan", fixture.channels.pan, intent.pan), ("tilt", fixture.channels.tilt, intent.tilt)]
+    {
+        let (Some(coarse), Some(fine)) = (coarse, fine_channel(profile, fixture, axis)) else {
+            continue;
+        };
+        let (hi, lo) = split_16bit(value);
+        frame.set_channel(Some(coarse), hi);
+        frame.set_channel(Some(fine), lo);
+    }
+}
+
+// ── Pan/tilt travel ──────────────────────────────────────────────────────────
+// The choreography speaks in a travel window: 0.5 is where the head rests and
+// the ends of 0-1 are half of `MOVER_PAN_WINDOW_DEG` / `MOVER_TILT_WINDOW_DEG`
+// either side of it. That is also what the stage preview draws. A moving head's
+// pan channel covers far more than that, so sending the value raw swung the
+// real head 3x further in pan than the preview showed — a "circle" on screen
+// was most of a full revolution on the truss.
+
+/// What a moving head's pan and tilt cover across their whole DMX range: one
+/// and a half turns of pan, and a half circle of tilt — the heads this rig is
+/// built from tilt 180° end to end, so the tilt window is the whole channel.
+/// A head with a different range (270° of tilt is also common, and some offer
+/// a shorter pan in their own menu) will move more or less than the preview;
+/// change these to match it.
+pub(crate) const HEAD_PAN_RANGE_DEG: f32 = 540.0;
+pub(crate) const HEAD_TILT_RANGE_DEG: f32 = 180.0;
+
+/// A two-axis moving head: something with both a pan and a tilt channel that
+/// is not a scanner laser (whose "pan/tilt" are mirror positions) or a tilting
+/// pixel bar (one axis, its own travel).
+fn is_moving_head(fixture: &FixturePatch, profile: Option<&FixtureProfile>) -> bool {
+    fixture.channels.pan.is_some()
+        && fixture.channels.tilt.is_some()
+        && fixture.channels.laser_macro.is_none()
+        && !matches!(profile.map(|p| p.kind), Some(FixtureKind::Laser))
+        && !matches!(
+            profile.map(|p| p.housing),
+            Some(FixtureHousing::ScanLaser | FixtureHousing::PixelBar)
+        )
+}
+
+/// The part of a movement channel's DMX range the profile says is position
+/// (0-1). Most heads use the whole channel; a few keep the top of it for
+/// built-in programs.
+fn motion_dmx_range(profile: Option<&FixtureProfile>, fixture: &FixturePatch, addr: Option<u16>) -> (f32, f32) {
+    let declared = profile.zip(addr).and_then(|(p, a)| profile_channel_at(p, fixture, a)).and_then(|c| {
+        match c.detail.as_ref() {
+            Some(ChannelDetail::Movement { range: Some(r), .. }) => Some((r.low as f32, r.high as f32)),
+            _ => None,
+        }
+    });
+    match declared {
+        Some((lo, hi)) if hi > lo && lo >= 0.0 && hi <= 1.0 => (lo, hi),
+        _ => (0.0, 1.0),
+    }
+}
+
+/// Convert a moving head's autopilot pan/tilt from the choreography's travel
+/// window to the head's own DMX range, so the head moves through the same
+/// angles the preview draws: its centre stays its centre, and the full 0-1
+/// swing covers the window instead of the head's whole travel.
+///
+/// Wire-only: the preview keeps the window value. Fixtures that are not moving
+/// heads are left exactly as they were.
+fn scale_motion_to_window(
+    intent: &mut FixtureIntentState,
+    fixture: &FixturePatch,
+    profile: Option<&FixtureProfile>,
+) {
+    if !is_moving_head(fixture, profile) {
+        return;
+    }
+    let fit = |value: f32, window_deg: f32, travel_deg: f32, (lo, hi): (f32, f32)| {
+        let share = (window_deg / travel_deg).min(1.0);
+        ((lo + hi) * 0.5 + (value.clamp(0.0, 1.0) - 0.5) * share * (hi - lo)).clamp(lo, hi)
+    };
+    intent.pan = fit(
+        intent.pan,
+        MOVER_PAN_WINDOW_DEG,
+        HEAD_PAN_RANGE_DEG,
+        motion_dmx_range(profile, fixture, fixture.channels.pan),
+    );
+    intent.tilt = fit(
+        intent.tilt,
+        MOVER_TILT_WINDOW_DEG,
+        HEAD_TILT_RANGE_DEG,
+        motion_dmx_range(profile, fixture, fixture.channels.tilt),
+    );
 }
 
 fn is_blackout(snapshot: &CueSnapshot) -> bool {
@@ -534,6 +892,9 @@ fn apply_segmented_fixture(
 ) {
     use crate::emerge::cue::lighting_cue::{auto_segment_kind, eval_segment, operator_segment_kind, SegmentKind};
 
+    // The autopilot looks keep their pattern but take the harmony's colour.
+    let auto_tint = harmonic_tint(snapshot, &intent);
+
     // A launched segment cue OWNS the cells (operator Global Brightness + Blinder
     // still apply on top). With no segment cue, fall back to the show-brain
     // per-cell effect so the bar's default look is unchanged (no regression).
@@ -582,8 +943,10 @@ fn apply_segmented_fixture(
         /// A launched segment cue owns the cells (scaled by Global Brightness).
         Cue(&'a [[f32; 3]]),
         /// Operator Segment FX picker / tension autopilot: one `SegmentKind`
-        /// evaluated per cell, scaled by `dim`.
-        Kind { kind: SegmentKind, dim: f32 },
+        /// evaluated per cell, scaled by `dim`. `tint` re-centres the pattern's
+        /// colours on the harmony (autopilot only — an operator's pick keeps
+        /// exactly the palette they chose).
+        Kind { kind: SegmentKind, dim: f32, tint: Option<HarmonicTint> },
         /// Show-brain gradient/chase fallback (~1 in 5 looks).
         Brain,
     }
@@ -611,6 +974,7 @@ fn apply_segmented_fixture(
             CellSrc::Kind {
                 kind: operator_segment_kind(ov.segment_fx, ov.segment_speed, snapshot.look_index),
                 dim,
+                tint: None,
             }
         }
         None => {
@@ -629,6 +993,7 @@ fn apply_segmented_fixture(
                         snapshot.auto_chase_cycle,
                     ),
                     dim: intent.dimmer,
+                    tint: auto_tint,
                 }
             }
         }
@@ -656,8 +1021,11 @@ fn apply_segmented_fixture(
                     let c = cells.get(i).copied().unwrap_or([0.0, 0.0, 0.0]);
                     (c[0] * gb, c[1] * gb, c[2] * gb, 0.0)
                 }
-                CellSrc::Kind { kind, dim } => {
-                    let c = eval_segment(kind, i, count, beats);
+                CellSrc::Kind { kind, dim, tint } => {
+                    let mut c = eval_segment(kind, i, count, beats);
+                    if let Some(t) = tint {
+                        c = t.apply(c);
+                    }
                     (c[0] * dim, c[1] * dim, c[2] * dim, 0.0)
                 }
                 CellSrc::Brain => segment_rgbw(snapshot, intent.dimmer, i, count),
@@ -672,6 +1040,88 @@ fn apply_segmented_fixture(
 
 fn to_dmx(value: f32) -> u8 {
     (value.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+// ── Harmonic colour for the autopilot segment looks ──────────────────────────
+// The pixel panels are the biggest light source on the rig, and four looks in
+// five they ran fixed palettes — a full rainbow drift whenever tension was low —
+// so the largest surface on stage ignored the harmony entirely. The autopilot
+// keeps every PATTERN (drift, interference, chase, sparkle) but folds its
+// colours into an arc around the colour the harmony has already given this
+// fixture: a settled chord is a tight analogous palette in the key's colour, an
+// unsettled one opens toward a wide spread, and a chord change fans it out for a
+// moment before it closes on the new colour. With no tonal centre to follow
+// (atonal noise, silence, no engine) the original palettes play unchanged.
+
+/// Palette width (turns of hue, end to end) on a settled harmony…
+const SEG_ARC_SETTLED: f32 = 0.16;
+/// …and on a fully unsettled one.
+const SEG_ARC_UNSETTLED: f32 = 0.42;
+/// Extra width at the moment of a chord change.
+const SEG_ARC_CHANGE_POP: f32 = 0.18;
+/// Tonal-confidence window over which the harmonic palette fades in (the
+/// Tonnetz centroid strength: ~0 atonal, ~0.4+ on a clear chord).
+const SEG_TINT_TONAL_LO: f32 = 0.12;
+const SEG_TINT_TONAL_HI: f32 = 0.35;
+/// Master depth of the recolour (0 = original palettes, 1 = fully harmonic).
+const SEG_HARMONIC_DEPTH: f32 = 1.0;
+
+/// A per-fixture, per-frame recolour for autopilot segment cells.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct HarmonicTint {
+    /// Centre hue (0-1): the harmony's colour for this fixture.
+    anchor: f32,
+    /// Half the palette width, in turns.
+    half_arc: f32,
+    /// 0-1 blend from the original cell colour to the harmonic one.
+    weight: f32,
+}
+
+impl HarmonicTint {
+    /// Fold a cell's hue into the arc, keeping its saturation and brightness —
+    /// so whites stay white, dark stays dark, and the pattern reads the same.
+    /// The fold is a sine of the original hue: periodic, so a scrolling
+    /// rainbow becomes a seamless back-and-forth across the arc with no jump
+    /// where the hue wraps.
+    fn apply(self, cell: [f32; 3]) -> [f32; 3] {
+        let (h, s, v) = rgb_hsv(cell);
+        if s <= 1e-3 || v <= 0.0 {
+            return cell;
+        }
+        let hue = (self.anchor + self.half_arc * (h * std::f32::consts::TAU).sin()).rem_euclid(1.0);
+        let tinted = crate::emerge::cue::lighting_cue::hsv_rgb(hue, s, v);
+        [
+            cell[0] + (tinted[0] - cell[0]) * self.weight,
+            cell[1] + (tinted[1] - cell[1]) * self.weight,
+            cell[2] + (tinted[2] - cell[2]) * self.weight,
+        ]
+    }
+}
+
+/// The harmonic recolour for this fixture this frame, or `None` to leave the
+/// original palette alone (no tonal centre, or the fixture has no colour of
+/// its own to follow — muted, whited-out).
+fn harmonic_tint(snapshot: &CueSnapshot, intent: &FixtureIntentState) -> Option<HarmonicTint> {
+    let tonal = ((snapshot.tonnetz_strength - SEG_TINT_TONAL_LO)
+        / (SEG_TINT_TONAL_HI - SEG_TINT_TONAL_LO))
+        .clamp(0.0, 1.0);
+    let tonal = tonal * tonal * (3.0 - 2.0 * tonal);
+    let weight = tonal * snapshot.trust.clamp(0.0, 1.0) * SEG_HARMONIC_DEPTH;
+    if weight <= 0.0 {
+        return None;
+    }
+    // The intent's own RGB is the harmony's colour for this fixture — pitch
+    // anchor, look rotation, major/minor temperature, Tonnetz drift, chord
+    // kicks — so the segmented panels stay in one palette with every other
+    // RGB fixture instead of deriving a second, slightly different hue here.
+    let (anchor, sat, val) = rgb_hsv([intent.red, intent.green, intent.blue]);
+    if sat < 0.05 || val <= 1e-4 {
+        return None;
+    }
+    let unrest = (1.0 - snapshot.stability).clamp(0.0, 1.0);
+    let change = snapshot.chord_change_env.clamp(0.0, 1.0) * snapshot.energy_slow.clamp(0.0, 1.0);
+    let arc = SEG_ARC_SETTLED + (SEG_ARC_UNSETTLED - SEG_ARC_SETTLED) * unrest + SEG_ARC_CHANGE_POP * change;
+    Some(HarmonicTint { anchor, half_arc: arc * 0.5, weight })
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -2611,5 +3061,631 @@ mod gigbar_section_tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod profile_wire_tests {
+    use super::*;
+    use crate::emerge::profiles::load_atla_fixture_profile;
+    use crate::emerge::{MoveFigure, MoveLook, MovementFrame};
+
+    const BEAM_7R: &str =
+        include_str!("../../assets/nas-fixture-profiles/shehds-7r-beam-move-head-light.json");
+
+    fn beam_profile() -> FixtureProfile {
+        load_atla_fixture_profile(BEAM_7R, Some("20 Channel")).expect("bundled 7R profile").profile
+    }
+
+    fn fixture(id: &str, start: u16, kind: StageVisualKind, channels: ChannelMap) -> FixturePatch {
+        FixturePatch {
+            id: id.to_string(),
+            name: id.to_string(),
+            universe: 1,
+            start_address: start,
+            profile_id: String::new(),
+            mode: String::new(),
+            position: StageVec3::zero(),
+            rotation: StageVec3::zero(),
+            scale: StageVec3::one(),
+            // SaaS authors nearly everything as Accent — panels included.
+            role: FixtureRole::Accent,
+            visual_kind: kind,
+            tags: vec![],
+            channels,
+            footprint: 0,
+            screen: None,
+        }
+    }
+
+    /// A 7R Beam patched the way the concert stage patches it (20ch mode).
+    fn beam(id: &str, start: u16) -> FixturePatch {
+        fixture(
+            id,
+            start,
+            StageVisualKind::Beam,
+            ChannelMap {
+                color_wheel: Some(start),
+                strobe: Some(start + 1),
+                dimmer: Some(start + 2),
+                gobo_slot: Some(start + 3),
+                prism: Some(start + 4),
+                gobo_rotation: Some(start + 5),
+                pan: Some(start + 9),
+                tilt: Some(start + 11),
+                ..ChannelMap::default()
+            },
+        )
+    }
+
+    fn panel(id: &str, start: u16) -> FixturePatch {
+        fixture(
+            id,
+            start,
+            StageVisualKind::LedPanel,
+            ChannelMap {
+                red: Some(start),
+                green: Some(start + 1),
+                blue: Some(start + 2),
+                ..ChannelMap::default()
+            },
+        )
+    }
+
+    fn patch(fixtures: Vec<FixturePatch>) -> DmxPatch {
+        DmxPatch { universe: 1, fixtures, trusses: vec![], venue: None }
+    }
+
+    fn playing() -> CueSnapshot {
+        CueSnapshot {
+            energy: 0.8,
+            energy_slow: 0.8,
+            reactivity: 1.0,
+            trust: 1.0,
+            intensity_license: 1.0,
+            ..CueSnapshot::default()
+        }
+    }
+
+    fn with_profile(ids: &[&str]) -> ProfileMap {
+        ids.iter().map(|id| (id.to_string(), beam_profile())).collect()
+    }
+
+    /// The slot whose DMX range holds `byte`, if any.
+    fn slot_holding(slots: &[ChannelSlot], byte: u8) -> Option<&ChannelSlot> {
+        slots.iter().find(|s| match (s.low_value, s.high_value) {
+            (Some(lo), Some(hi)) => (lo..=hi).contains(&(byte as f64)),
+            _ => s.value == byte,
+        })
+    }
+
+    fn detail_at(profile: &FixtureProfile, offset: u16) -> &ChannelDetail {
+        profile
+            .channels
+            .iter()
+            .find(|c| c.channel_offset == offset)
+            .and_then(|c| c.detail.as_ref())
+            .expect("channel detail")
+    }
+
+    #[test]
+    fn mover_ranking_counts_each_moving_address_once_and_ignores_panels() {
+        // The concert rig in miniature: every fixture is role Accent, most
+        // can't move, and each group of heads is daisy-chained on one address.
+        let mut fixtures = Vec::new();
+        for i in 0..12 {
+            fixtures.push(panel(&format!("panel{i}"), 1));
+        }
+        for i in 0..5 {
+            fixtures.push(beam(&format!("beam-a{i}"), 93));
+        }
+        for i in 0..3 {
+            fixtures.push(beam(&format!("beam-b{i}"), 113));
+        }
+        assert_eq!(MoverRanking::new(fixtures.iter()).addrs, vec![93, 113]);
+        // A fixture with no channel map at all (preview-only) still counts.
+        fixtures.push(fixture("virtual", 200, StageVisualKind::Beam, ChannelMap::default()));
+        assert_eq!(MoverRanking::new(fixtures.iter()).addrs, vec![93, 113, 200]);
+    }
+
+    #[test]
+    fn heads_on_one_address_level_from_one_aim() {
+        // Three up-firing heads on one address, each placed at its own angle,
+        // and a lone head elsewhere.
+        let mut fixtures = Vec::new();
+        for (i, aim) in [118.0, 126.0, 122.0].into_iter().enumerate() {
+            let mut head = beam(&format!("floor{i}"), 113);
+            head.rotation.x = aim;
+            fixtures.push(head);
+        }
+        let mut solo = beam("solo", 93);
+        solo.rotation.x = 40.0;
+        fixtures.push(solo);
+        let mut bystander = panel("panel", 1);
+        bystander.rotation.x = 15.0;
+        fixtures.push(bystander);
+
+        let movers = MoverRanking::new(fixtures.iter());
+        assert_eq!(movers.count(), 2);
+        // Every copy on 113 gets the same ordinal and the same aim: the
+        // lowest any of them is placed at.
+        for head in &fixtures[..3] {
+            assert_eq!(movers.place(head), (1, 118.0));
+        }
+        assert_eq!(movers.place(&fixtures[3]), (0, 40.0));
+        // Not a mover: ordinal 0 and its own aim, as before.
+        assert_eq!(movers.place(&fixtures[4]), (0, 15.0));
+    }
+
+    #[test]
+    fn colour_wheel_always_lands_on_a_real_gel() {
+        let profile = beam_profile();
+        let ChannelDetail::ColorWheel { slots, .. } = detail_at(&profile, 1) else {
+            panic!("7R ch1 is the colour wheel");
+        };
+        let rig = patch(vec![beam("a", 93), beam("b", 113)]);
+        let profiles = with_profile(&["a", "b"]);
+        let mut gels = std::collections::BTreeSet::new();
+        for pc in 0..12u8 {
+            for look in 0..5 {
+                let snap = CueSnapshot { dominant_pc: pc, look_index: look, ..playing() };
+                let frame = render_dmx_frame(&snap, &rig, &profiles, None);
+                for addr in [93usize, 113] {
+                    let byte = frame.data[addr - 1];
+                    let slot = slot_holding(slots, byte)
+                        .unwrap_or_else(|| panic!("pc {pc} look {look}: byte {byte} is between gels"));
+                    assert_ne!(slot.name, "Open", "a harmonic hue never parks on open white");
+                    gels.insert(slot.name.clone());
+                }
+                // The old formula is still what a profile-less fixture gets.
+                let bare = render_dmx_frame(&snap, &rig, &ProfileMap::new(), None);
+                assert_eq!(bare.data[92], pc * 21);
+            }
+        }
+        assert!(gels.len() >= 6, "the harmony reaches across the wheel: {gels:?}");
+    }
+
+    #[test]
+    fn beam_groups_take_different_chord_tone_gels() {
+        let rig = patch(vec![beam("a", 93), beam("b", 113)]);
+        let profiles = with_profile(&["a", "b"]);
+        let differing = (0..12u8)
+            .filter(|&pc| {
+                let snap = CueSnapshot { dominant_pc: pc, ..playing() };
+                let frame = render_dmx_frame(&snap, &rig, &profiles, None);
+                frame.data[92] != frame.data[112]
+            })
+            .count();
+        assert!(differing >= 10, "root and fifth groups sit on different gels: {differing}/12");
+    }
+
+    #[test]
+    fn wheel_refinement_reports_the_gel_colour_and_skips_colourless_wheels() {
+        let profile = beam_profile();
+        let fx = beam("a", 93);
+        // Hue 0 = red: the 7R's nearest gel is Dark Red (DMX 9-12).
+        let mut intent = FixtureIntentState { wheel_hue: 0.0, color_wheel: 200, ..Default::default() };
+        refine_with_profile(&mut intent, &fx, Some(&profile));
+        assert!((9..=12).contains(&intent.color_wheel), "byte {}", intent.color_wheel);
+        let rgb = intent.wheel_rgb.expect("the resolved gel's colour");
+        assert!(rgb[0] > 0.5 && rgb[1] < 0.1 && rgb[2] < 0.1, "dark red: {rgb:?}");
+        // Blue-ish hue: plain Blue wins over Dark Blue / CTB at the same hue.
+        let mut blue = FixtureIntentState { wheel_hue: 0.66, ..Default::default() };
+        refine_with_profile(&mut blue, &fx, Some(&profile));
+        assert!((26..=29).contains(&blue.color_wheel), "byte {}", blue.color_wheel);
+
+        // A wheel with no real colours (all-white effect gels) is left alone.
+        let white = ChannelSlot {
+            name: "White".into(),
+            value: 40,
+            low_value: None,
+            high_value: None,
+            enabled: true,
+            rgb: Some([1.0, 1.0, 1.0]),
+        };
+        assert!(nearest_wheel_slot(&[white.clone(), white], 0.3).is_none());
+        let mut untouched = FixtureIntentState { color_wheel: 77, ..Default::default() };
+        refine_with_profile(&mut untouched, &fx, None);
+        assert_eq!((untouched.color_wheel, untouched.wheel_rgb), (77, None));
+    }
+
+    #[test]
+    fn gobo_slots_resolve_to_real_wheel_positions() {
+        let profile = beam_profile();
+        let ChannelDetail::Gobo { steps } = detail_at(&profile, 4) else {
+            panic!("7R ch4 is the gobo wheel");
+        };
+        let fx = beam("a", 93);
+        let mut seen = std::collections::BTreeSet::new();
+        for slot in 0..8u8 {
+            let v = profile_gobo_value(&fx, &profile, slot).expect("7R lists its gobos");
+            let byte = to_dmx(v);
+            let step = slot_holding(steps, byte)
+                .unwrap_or_else(|| panic!("slot {slot}: byte {byte} is not on a gobo"));
+            seen.insert(step.name.clone());
+        }
+        assert_eq!(seen.len(), 8, "eight slots, eight different gobos: {seen:?}");
+        assert!(seen.contains("Open"), "slot 0 is the open beam");
+
+        // …and that is what reaches the wire (the ×32 spread ran off the wheel
+        // at 96+; the last real gobo ends at 71).
+        let rig = patch(vec![beam("a", 93)]);
+        let profiles = with_profile(&["a"]);
+        for pc in 0..12u8 {
+            let snap = CueSnapshot { dominant_pc: pc, ..playing() };
+            let byte = render_dmx_frame(&snap, &rig, &profiles, None).data[95];
+            assert!(slot_holding(steps, byte).is_some(), "pc {pc}: gobo byte {byte}");
+        }
+    }
+
+    #[test]
+    fn profile_resting_values_are_stamped_only_with_a_profile() {
+        let rig = patch(vec![beam("a", 93)]);
+        let snap = playing();
+        // 7R ch9 = Focus, pinned at 127 by the profile; nothing maps it.
+        let with = render_dmx_frame(&snap, &rig, &with_profile(&["a"]), None);
+        assert_eq!(with.data[93 + 8 - 1], 127, "focus rests where the profile says");
+        let without = render_dmx_frame(&snap, &rig, &ProfileMap::new(), None);
+        assert_eq!(without.data[93 + 8 - 1], 0);
+        // Zero-default control channels (Reset, Lamp) are never touched.
+        assert_eq!(with.data[93 + 14 - 1], 0);
+        assert_eq!(with.data[93 + 15 - 1], 0);
+    }
+
+    #[test]
+    fn pan_and_tilt_go_out_at_16_bit_when_the_fixture_has_fine_channels() {
+        assert_eq!(split_16bit(0.0), (0, 0));
+        assert_eq!(split_16bit(1.0), (255, 255));
+        assert_eq!(split_16bit(0.5), (128, 0));
+        assert_eq!(split_16bit(7.0), (255, 255), "clamped");
+
+        let profile = beam_profile();
+        let fx = beam("a", 93);
+        assert_eq!(fine_channel(&profile, &fx, "pan"), Some(93 + 10));
+        assert_eq!(fine_channel(&profile, &fx, "tilt"), Some(93 + 12));
+
+        let rig = patch(vec![beam("a", 93)]);
+        let profiles = with_profile(&["a"]);
+        let mut fine_values = std::collections::BTreeSet::new();
+        for step in 0..40 {
+            let snap = CueSnapshot { frame_time: step as f32 * 0.137, ..playing() };
+            let fine = render_dmx_frame(&snap, &rig, &profiles, None);
+            let coarse = render_dmx_frame(&snap, &rig, &ProfileMap::new(), None);
+            for (c, f) in [(93 + 9, 93 + 10), (93 + 11, 93 + 12)] {
+                // Same position either way: the 16-bit pair refines the 8-bit
+                // byte, it never moves the head somewhere else.
+                let v16 = ((fine.data[c - 1] as u32) << 8 | fine.data[f - 1] as u32) as f32 / 65535.0;
+                let v8 = coarse.data[c - 1] as f32 / 255.0;
+                assert!((v16 - v8).abs() <= 0.5 / 255.0 + 1e-4, "16-bit {v16} vs 8-bit {v8}");
+                assert_eq!(coarse.data[f - 1], 0, "no profile: fine channel untouched");
+            }
+            fine_values.insert(fine.data[93 + 10 - 1]);
+        }
+        assert!(fine_values.len() > 8, "the fine byte is really moving: {fine_values:?}");
+    }
+
+    /// 16-bit pan and tilt (0-1) of the 7R patched at `start`.
+    fn pan_tilt(frame: &DmxFrame, start: usize) -> (f32, f32) {
+        let at = |c: usize| ((frame.data[c - 1] as u32) << 8 | frame.data[c] as u32) as f32 / 65535.0;
+        (at(start + 9), at(start + 11))
+    }
+
+    #[test]
+    fn a_moving_head_is_sent_only_the_travel_the_preview_draws() {
+        // The window is a third of a 540° pan and the whole of a 180° tilt,
+        // centred on the head's own centre.
+        let fx = beam("a", 93);
+        let scaled = |pan: f32, tilt: f32| {
+            let mut it = FixtureIntentState { pan, tilt, ..FixtureIntentState::default() };
+            scale_motion_to_window(&mut it, &fx, None);
+            (it.pan, it.tilt)
+        };
+        let near = |a: f32, b: f32| (a - b).abs() < 1e-5;
+        let (p, t) = scaled(0.5, 0.5);
+        assert!(near(p, 0.5) && near(t, 0.5), "the centre stays the centre");
+        let (p, t) = scaled(0.0, 0.0);
+        assert!(near(p, 0.5 - 1.0 / 6.0) && near(t, 0.0), "low end: {p} {t}");
+        let (p, t) = scaled(1.0, 1.0);
+        assert!(near(p, 0.5 + 1.0 / 6.0) && near(t, 1.0), "high end: {p} {t}");
+        // In degrees on the real head: ±90° of pan, ±90° of tilt — the
+        // half-sphere around where it was installed pointing.
+        let (pan_deg, tilt_deg) = ((p - 0.5) * HEAD_PAN_RANGE_DEG, (t - 0.5) * HEAD_TILT_RANGE_DEG);
+        assert!((pan_deg - MOVER_PAN_WINDOW_DEG * 0.5).abs() < 0.01, "pan reaches {pan_deg}°");
+        assert!((tilt_deg - MOVER_TILT_WINDOW_DEG * 0.5).abs() < 0.01, "tilt reaches {tilt_deg}°");
+
+        // On the wire, through a whole lively passage — figures, levels,
+        // chord throws — the head never leaves that window, and really uses it.
+        let rig = patch(vec![beam("a", 93), beam("b", 113)]);
+        let profiles = with_profile(&["a", "b"]);
+        let looks = [MoveFigure::Ballyhoo, MoveFigure::Circle, MoveFigure::Wave, MoveFigure::Sweep];
+        let (mut pan_lo, mut pan_hi, mut tilt_lo, mut tilt_hi) = (1.0f32, 0.0f32, 1.0f32, 0.0f32);
+        for step in 0..240 {
+            let look = MoveLook::new(looks[step / 60], 2.0);
+            let snap = CueSnapshot {
+                frame_time: step as f32 * 0.11,
+                energy: 1.0,
+                drop_impact: if step % 60 < 6 { 1.0 } else { 0.0 },
+                movement: MovementFrame {
+                    look,
+                    prev: look,
+                    throw: if step % 40 < 8 { 1.0 } else { -0.4 },
+                    aim_pan: ((step as f32) * 0.05).sin(),
+                    level: (step / 30 % 3) as f32 * 0.5,
+                    split: if step / 30 % 4 == 3 { 0.5 } else { 0.0 },
+                    leveled: true,
+                    ..MovementFrame::default()
+                },
+                ..playing()
+            };
+            let frame = render_dmx_frame(&snap, &rig, &profiles, None);
+            for start in [93, 113] {
+                let (pan, tilt) = pan_tilt(&frame, start);
+                pan_lo = pan_lo.min(pan);
+                pan_hi = pan_hi.max(pan);
+                tilt_lo = tilt_lo.min(tilt);
+                tilt_hi = tilt_hi.max(tilt);
+            }
+        }
+        let slack = 1.0 / 65535.0;
+        assert!(pan_lo >= 0.5 - 1.0 / 6.0 - slack && pan_hi <= 0.5 + 1.0 / 6.0 + slack, "pan {pan_lo}..{pan_hi}");
+        assert!(tilt_lo >= 0.0 && tilt_hi <= 1.0, "tilt {tilt_lo}..{tilt_hi}");
+        assert!(pan_hi - pan_lo > 0.16, "pan uses its window: {pan_lo}..{pan_hi}");
+        assert!(tilt_hi - tilt_lo > 0.60, "tilt uses its window: {tilt_lo}..{tilt_hi}");
+    }
+
+    #[test]
+    fn only_moving_heads_are_scaled() {
+        let untouched = |fx: &FixturePatch, profile: Option<&FixtureProfile>| {
+            let mut it = FixtureIntentState { pan: 0.9, tilt: 0.1, ..FixtureIntentState::default() };
+            scale_motion_to_window(&mut it, fx, profile);
+            it.pan == 0.9 && it.tilt == 0.1
+        };
+        // A scanner laser's pan/tilt are mirror positions.
+        let mut laser = beam("laser", 1);
+        laser.channels.laser_macro = Some(20);
+        assert!(untouched(&laser, None), "laser macro channel");
+        let mut laser_profile = beam_profile();
+        laser_profile.kind = FixtureKind::Laser;
+        assert!(untouched(&beam("l2", 1), Some(&laser_profile)), "laser profile");
+        // A tilting pixel bar has one axis and its own travel.
+        let mut bar = beam("bar", 1);
+        bar.channels.pan = None;
+        assert!(untouched(&bar, None), "tilt-only bar");
+        let mut bar_profile = beam_profile();
+        bar_profile.housing = FixtureHousing::PixelBar;
+        assert!(untouched(&beam("b2", 1), Some(&bar_profile)), "pixel-bar housing");
+        // A panel has neither.
+        assert!(untouched(&panel("p", 1), None));
+        // The real thing is scaled, with or without a resolved profile.
+        assert!(!untouched(&beam("head", 1), None));
+        assert!(!untouched(&beam("head", 1), Some(&beam_profile())));
+    }
+
+    #[test]
+    fn scaling_respects_the_position_range_a_profile_declares() {
+        // A head that keeps the top half of its pan channel for built-in
+        // programs: the window is centred in, and stays inside, the half that
+        // is position.
+        let mut profile = beam_profile();
+        let fx = beam("a", 93);
+        let pan_offset = 10; // 20ch mode: pan is the 10th channel
+        let pan = profile.channels.iter_mut().find(|c| c.channel_offset == pan_offset).expect("pan channel");
+        assert_eq!(pan.attribute, DmxAttribute::Pan);
+        pan.detail = Some(ChannelDetail::Movement {
+            range: Some(crate::emerge::contracts::ValueRange { low: 0.0, high: 0.5 }),
+            smoothing: None,
+            invert: false,
+            width: None,
+            offset: None,
+        });
+        for value in [0.0f32, 0.5, 1.0] {
+            let mut it = FixtureIntentState { pan: value, tilt: 0.5, ..FixtureIntentState::default() };
+            scale_motion_to_window(&mut it, &fx, Some(&profile));
+            assert!((0.0..=0.5).contains(&it.pan), "stays in the position half: {}", it.pan);
+            let want = 0.25 + (value - 0.5) * (MOVER_PAN_WINDOW_DEG / HEAD_PAN_RANGE_DEG) * 0.5;
+            assert!((it.pan - want).abs() < 1e-5, "pan {value} -> {} (want {want})", it.pan);
+        }
+    }
+
+    #[test]
+    fn a_cue_that_sets_pan_goes_out_as_authored() {
+        use crate::emerge::{ActiveCue, CueListResponse};
+        // An explicit cue position is a DMX value the operator chose: it is
+        // not squeezed into the autopilot's window.
+        let rig = patch(vec![beam("a", 93)]);
+        let json = r#"{"cues":[{"launch_id":"L","status":"ACTIVE","variables":{},
+            "launch_contract":{"bindings":[
+                {"id":"pan","target":{"channel_name":"Pan","type":"PAN"},
+                 "source":{"kind":"constant","value":1.0},
+                 "resolve":{"mode":"override","priority":50}}]}}]}"#;
+        let list: CueListResponse = serde_json::from_str(json).unwrap();
+        let cues: Vec<ActiveCue> = list.cues.iter().map(ActiveCue::from_dto).collect();
+        let mut reports = std::collections::HashMap::new();
+        let frame = render_dmx_frame_with_cues(
+            &playing(),
+            &rig,
+            &ProfileMap::new(),
+            None,
+            &cues,
+            &mut reports,
+            &FixtureOverrides::default(),
+        );
+        assert_eq!(frame.data[93 + 9 - 1], 255, "the cue's pan reaches the head unscaled");
+    }
+
+    #[test]
+    fn a_movement_figure_reaches_the_wire_differently_per_group() {
+        let rig = patch(vec![beam("a", 93), beam("b", 113)]);
+        let profiles = with_profile(&["a", "b"]);
+        let fan = MoveLook::new(MoveFigure::Fan, 4.0);
+        let pan16 = |frame: &DmxFrame, start: usize| {
+            (frame.data[start + 9 - 1] as u32) << 8 | frame.data[start + 10 - 1] as u32
+        };
+        let (mut moved, mut apart) = (0, 0);
+        for step in 0..32 {
+            let base = CueSnapshot { frame_time: step as f32 * 0.21, ..playing() };
+            let figure = CueSnapshot {
+                movement: MovementFrame { look: fan, prev: fan, ..MovementFrame::default() },
+                ..base.clone()
+            };
+            let legacy = render_dmx_frame(&base, &rig, &profiles, None);
+            let fanned = render_dmx_frame(&figure, &rig, &profiles, None);
+            if pan16(&fanned, 93) != pan16(&legacy, 93) {
+                moved += 1;
+            }
+            if pan16(&fanned, 93) != pan16(&fanned, 113) {
+                apart += 1;
+            }
+        }
+        assert!(moved > 24, "the figure changes what the head is sent: {moved}/32");
+        assert!(apart > 24, "the two groups hold different places in it: {apart}/32");
+    }
+}
+
+#[cfg(test)]
+mod segment_harmony_tests {
+    use super::*;
+    use crate::emerge::profiles::load_atla_fixture_profile;
+
+    const PANEL: &str = include_str!(
+        "../../assets/nas-fixture-profiles/shehds-200w-rgb-strobe-light-8-segment.json"
+    );
+
+    fn circular(a: f32, b: f32) -> f32 {
+        let d = (a - b).rem_euclid(1.0);
+        d.min(1.0 - d)
+    }
+
+    /// Hues of the lit cells of the one 8-cell panel in a rendered frame.
+    fn cell_hues(snapshot: &CueSnapshot) -> Vec<f32> {
+        let profile = load_atla_fixture_profile(PANEL, Some("24 Channel")).expect("panel").profile;
+        let segments = segments_for_profile(&profile, 1);
+        assert_eq!(segments.len(), 8, "the 24ch mode is eight RGB cells");
+        let fixture = FixturePatch {
+            id: "panel".into(),
+            name: "panel".into(),
+            universe: 1,
+            start_address: 1,
+            profile_id: String::new(),
+            mode: "24 Channel".into(),
+            position: StageVec3::zero(),
+            rotation: StageVec3::zero(),
+            scale: StageVec3::one(),
+            role: FixtureRole::Accent,
+            visual_kind: StageVisualKind::LedPanel,
+            tags: vec![],
+            // The concert stage maps only the last cell's RGB on this mode.
+            channels: ChannelMap {
+                red: Some(22),
+                green: Some(23),
+                blue: Some(24),
+                ..ChannelMap::default()
+            },
+            footprint: 0,
+            screen: None,
+        };
+        let patch = DmxPatch { universe: 1, fixtures: vec![fixture], trusses: vec![], venue: None };
+        let profiles: ProfileMap = [("panel".to_string(), profile)].into_iter().collect();
+        let frame = render_dmx_frame(snapshot, &patch, &profiles, None);
+        let byte = |ch: Option<u16>| frame.data[ch.expect("cell channel") as usize - 1] as f32 / 255.0;
+        segments
+            .iter()
+            .map(|seg| [byte(seg.red), byte(seg.green), byte(seg.blue)])
+            .filter(|c| c.iter().cloned().fold(0.0, f32::max) > 0.05)
+            .map(|c| rgb_hsv(c).0)
+            .collect()
+    }
+
+    /// Widest gap between any two hues (0 = one colour, 0.5 = opposite).
+    fn spread(hues: &[f32]) -> f32 {
+        let mut widest = 0.0f32;
+        for a in hues {
+            for b in hues {
+                widest = widest.max(circular(*a, *b));
+            }
+        }
+        widest
+    }
+
+    /// A calm autopilot look (the rainbow drift), on a look the tension
+    /// engine owns (look 0 is the show-brain gradient).
+    fn calm() -> CueSnapshot {
+        CueSnapshot {
+            energy: 0.8,
+            energy_slow: 0.8,
+            reactivity: 1.0,
+            look_index: 1,
+            stability: 1.0,
+            trust: 1.0,
+            frame_time: 3.3,
+            ..CueSnapshot::default()
+        }
+    }
+
+    #[test]
+    fn the_fold_keeps_the_pattern_and_only_moves_hue_into_the_arc() {
+        let tint = HarmonicTint { anchor: 0.6, half_arc: 0.08, weight: 1.0 };
+        assert_eq!(tint.apply([1.0, 1.0, 1.0]), [1.0, 1.0, 1.0], "white stays white");
+        assert_eq!(tint.apply([0.0, 0.0, 0.0]), [0.0, 0.0, 0.0], "dark stays dark");
+        let mut last = None;
+        for step in 0..=200 {
+            let h = step as f32 / 200.0;
+            let cell = crate::emerge::cue::lighting_cue::hsv_rgb(h, 0.8, 0.5);
+            let (hue, sat, val) = rgb_hsv(tint.apply(cell));
+            assert!(circular(hue, 0.6) <= 0.08 + 1e-3, "hue {h} folded to {hue}");
+            assert!((sat - 0.8).abs() < 1e-3 && (val - 0.5).abs() < 1e-3, "sat/val kept");
+            if let Some(prev) = last {
+                assert!(circular(hue, prev) < 0.01, "no jump as the source hue scrolls");
+            }
+            last = Some(hue);
+        }
+        // Half weight is half way (in RGB) — the fade-in is a real crossfade.
+        let half = HarmonicTint { weight: 0.5, ..tint };
+        let (full, src) = (tint.apply([1.0, 0.0, 0.0]), [1.0, 0.0, 0.0]);
+        let mid = half.apply(src);
+        for k in 0..3 {
+            assert!((mid[k] - (src[k] + full[k]) * 0.5).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn panels_take_the_harmonys_colour_when_there_is_a_tonal_centre() {
+        // No tonal centre: the original rainbow drift, right round the wheel.
+        let atonal = cell_hues(&calm());
+        assert!(atonal.len() >= 6, "the look is lit");
+        assert!(spread(&atonal) > 0.3, "rainbow spans the wheel: {atonal:?}");
+
+        // A clear, settled chord: a tight analogous palette instead.
+        let tonal = CueSnapshot { tonnetz_strength: 0.6, ..calm() };
+        let settled = cell_hues(&tonal);
+        assert!(settled.len() >= 6, "still the same lit pattern");
+        assert!(
+            spread(&settled) <= SEG_ARC_SETTLED + 0.02,
+            "settled harmony = one colour family: {settled:?}"
+        );
+
+        // …that follows the harmony: a different pitch anchor moves the family.
+        let moved = cell_hues(&CueSnapshot { dominant_pc: 6, ..tonal.clone() });
+        let centre = |h: &[f32]| {
+            let (sx, sy) = h.iter().fold((0.0, 0.0), |(x, y), v| {
+                let a = v * std::f32::consts::TAU;
+                (x + a.cos(), y + a.sin())
+            });
+            (sy.atan2(sx) / std::f32::consts::TAU).rem_euclid(1.0)
+        };
+        assert!(
+            circular(centre(&settled), centre(&moved)) > 0.25,
+            "a tritone away is across the wheel"
+        );
+
+        // An unsettled harmony opens the palette; so does a chord change.
+        let unsettled = cell_hues(&CueSnapshot { stability: 0.0, ..tonal.clone() });
+        assert!(spread(&unsettled) > spread(&settled) + 0.05, "unrest widens the palette");
+        let change = cell_hues(&CueSnapshot { chord_change_env: 1.0, ..tonal.clone() });
+        assert!(spread(&change) > spread(&settled) + 0.03, "a chord change fans it out");
+
+        // Coherence gates it: a tonal centre nobody trusts stays on the rainbow.
+        let untrusted = cell_hues(&CueSnapshot { trust: 0.0, ..tonal });
+        assert!(spread(&untrusted) > 0.3);
     }
 }

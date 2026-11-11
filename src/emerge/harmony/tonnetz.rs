@@ -88,6 +88,14 @@ pub struct TonnetzFrame {
     /// circles. Self-enveloping (spikes on a jump, relaxes as the baseline settles)
     /// so a consumer needs no decay timer of its own.
     pub delta: f32,
+    /// Where the harmony SITS on the circle of fifths, as a point in the unit
+    /// disc (lightly smoothed). The angle is the key area, the radius is how
+    /// committed the harmony is — an atonal wash collapses to the centre, a
+    /// clear chord sits out toward the rim. A 2-D position a mover can aim at
+    /// directly: chords a fifth apart are 30° apart, a distant modulation
+    /// crosses the disc.
+    pub x: f32,
+    pub y: f32,
 }
 
 /// Stateful per-frame tracker: holds a slow-EMA baseline of the centroid so a
@@ -96,19 +104,30 @@ pub struct TonnetzFrame {
 pub struct TonnetzTracker {
     baseline: TonnetzCentroid,
     primed: bool,
+    /// Lightly smoothed fifths centroid — the published harmonic position.
+    pos_x: f32,
+    pos_y: f32,
 }
 
 /// Slow baseline so a harmonic jump spikes the delta before the baseline catches
 /// up (~0.5s envelope at ~47fps). Tunable.
 const BASELINE_EMA: f32 = 0.04;
+/// Smoothing of the published harmonic position (~100ms at 60fps): enough to
+/// take inner-voice flutter off a mover's aim point, quick enough that a chord
+/// change still reads as a move. The movement director slews on top.
+const POSITION_EMA: f32 = 0.15;
 
 impl TonnetzTracker {
     pub fn update(&mut self, chroma: &[f32; 12]) -> TonnetzFrame {
         let c = TonnetzCentroid::from_chroma(chroma);
         if !self.primed {
             self.baseline = c;
+            self.pos_x = c.fcx;
+            self.pos_y = c.fcy;
             self.primed = true;
         }
+        self.pos_x += (c.fcx - self.pos_x) * POSITION_EMA;
+        self.pos_y += (c.fcy - self.pos_y) * POSITION_EMA;
         let delta = ((c.fcx - self.baseline.fcx).powi(2)
             + (c.fcy - self.baseline.fcy).powi(2)
             + (c.tcx - self.baseline.tcx).powi(2)
@@ -124,6 +143,8 @@ impl TonnetzTracker {
             hue: c.fifths_hue(),
             strength: c.fifths_strength(),
             delta,
+            x: self.pos_x,
+            y: self.pos_y,
         }
     }
 }
@@ -184,6 +205,41 @@ mod tests {
             last = t.update(&fs_maj).delta;
         }
         assert!(last < jump.delta, "surprise relaxes as the baseline settles");
+    }
+
+    #[test]
+    fn harmonic_position_tracks_the_key_area_and_collapses_when_atonal() {
+        let triad = |root: usize| {
+            let mut c = [0.0; 12];
+            c[root] = 1.0;
+            c[(root + 4) % 12] = 0.8;
+            c[(root + 7) % 12] = 0.9;
+            c
+        };
+        let settle = |t: &mut TonnetzTracker, c: &[f32; 12]| {
+            let mut f = TonnetzFrame::default();
+            for _ in 0..120 {
+                f = t.update(c);
+            }
+            f
+        };
+        let mut t = TonnetzTracker::default();
+        let c = settle(&mut t, &triad(0));
+        let g = settle(&mut t, &triad(7));
+        let fs = settle(&mut t, &triad(6));
+        // A clear triad sits well out from the centre.
+        assert!(c.x.hypot(c.y) > 0.4, "a triad is a committed position");
+        // A fifth away is a short walk; the tritone is across the disc.
+        let near = (g.x - c.x).hypot(g.y - c.y);
+        let far = (fs.x - c.x).hypot(fs.y - c.y);
+        assert!(near < far * 0.5, "C→G ({near}) is much closer than C→F# ({far})");
+        // The position glides rather than teleporting on a change.
+        let first = t.update(&triad(0));
+        let step = (first.x - fs.x).hypot(first.y - fs.y);
+        assert!(step < far * 0.5, "one frame covers only part of the move: {step}");
+        // An atonal wash has no position: it drains to the centre.
+        let flat = settle(&mut t, &[1.0; 12]);
+        assert!(flat.x.hypot(flat.y) < 0.02, "atonal collapses to the centre");
     }
 
     #[test]

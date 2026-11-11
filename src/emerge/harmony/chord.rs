@@ -169,12 +169,57 @@ pub struct ChordFrame {
     pub prl_move: u8,
     /// Accent envelope (0-1) for the P/R/L move, set to 1.0 on commit and decayed.
     pub prl_env: f32,
+    /// Root pitch class (0-11) of the last committed chord. Held through a
+    /// no-chord gap so consumers keep a stable anchor; only meaningful once a
+    /// chord has been heard (`quality != 0` now or earlier).
+    pub root: u8,
+    /// Accent envelope (0-1) for ANY chord-to-chord change — set to 1.0 when
+    /// a different chord commits and decayed. The P/R/L envelope above only
+    /// fires on three special moves; this one fires on the everyday ones too
+    /// (I→IV, V→I, ii→V …), which is most of what a progression is.
+    pub change_env: f32,
+    /// How far the root travelled on the circle of fifths at the last change
+    /// (0-6): 0 = same root (quality change), 1 = a fifth/fourth, 2 = a whole
+    /// step, 3 = a minor third, 4 = a major third, 5 = a semitone, 6 = the
+    /// tritone. Harmonic distance, so a consumer can size its reaction.
+    pub root_motion: u8,
+    /// Direction of that travel: +1 sharpward (up a fifth), -1 flatward (up a
+    /// fourth), 0 for no root move or the tritone (which has no side).
+    pub root_dir: i8,
+    /// Harmonic rhythm (0-1): how busy the chord changes are. ~0.15 for a
+    /// change every four seconds, ~0.5 for one a second, 1.0 for two a second
+    /// or faster; decays to 0 on a held chord.
+    pub rhythm: f32,
+}
+
+/// Signed circle-of-fifths travel between two roots: `(distance 0-6,
+/// direction)`. Up a fifth is +1, up a fourth is -1; the tritone is the far
+/// side of the circle and has no direction.
+pub fn fifths_travel(prev_root: u8, cur_root: u8) -> (u8, i8) {
+    let semis = (cur_root as i32 - prev_root as i32).rem_euclid(12);
+    let steps = (semis * 7).rem_euclid(12); // 0..11 sharpward steps
+    match steps {
+        0 => (0, 0),
+        1..=5 => (steps as u8, 1),
+        6 => (6, 0),
+        _ => ((12 - steps) as u8, -1),
+    }
 }
 
 /// Frames a candidate must persist before it commits (debounce ~130ms @ 47fps).
 const SWITCH_FRAMES: u8 = 6;
 /// Per-frame decay of the P/R/L accent envelope (~0.5s tail).
 const PRL_DECAY: f32 = 0.92;
+/// Per-frame decay of the any-change accent envelope (~0.7s tail) — a touch
+/// longer than the P/R/L tail so a mover has time to travel on it.
+const CHANGE_DECAY: f32 = 0.94;
+/// Per-frame leak of the harmonic-rhythm accumulator (~3s memory at 60fps).
+const RHYTHM_LEAK: f32 = 0.995;
+/// Accumulator level that reads as "fully busy" (two changes a second).
+const RHYTHM_FULL: f32 = 6.0;
+/// Per-frame smoothing of the published rhythm so it glides between changes
+/// instead of sawing with every commit.
+const RHYTHM_SMOOTH: f32 = 0.03;
 
 /// Stateful tracker: hysteresis-stable current chord + a decaying P/R/L accent
 /// envelope. Lives per-thread (osc/thread), fed the slew-limited chroma each frame.
@@ -185,6 +230,15 @@ pub struct ChordTracker {
     cand_count: u8,
     prl_move: ChordMove,
     prl_env: f32,
+    /// The last chord that committed, kept across no-chord gaps so a change
+    /// is measured chord-to-chord (C → silence → F still reads as C → F, and
+    /// C → silence → C is no change at all).
+    last_chord: Option<Chord>,
+    change_env: f32,
+    root_motion: u8,
+    root_dir: i8,
+    rhythm_acc: f32,
+    rhythm: f32,
 }
 
 impl ChordTracker {
@@ -204,6 +258,13 @@ impl ChordTracker {
             self.cand_count = 1;
         }
 
+        // Any-change accent + harmonic rhythm decay every frame, like prl_env.
+        self.change_env *= CHANGE_DECAY;
+        if self.change_env < 0.01 {
+            self.change_env = 0.0;
+        }
+        self.rhythm_acc *= RHYTHM_LEAK;
+
         if self.cand_count >= SWITCH_FRAMES && self.candidate != self.current {
             if let (Some(prev), Some(cur)) = (self.current, self.candidate) {
                 let mv = classify_move(prev, cur);
@@ -212,13 +273,34 @@ impl ChordTracker {
                     self.prl_env = 1.0;
                 }
             }
+            if let Some(cur) = self.candidate {
+                // Measured against the last chord HEARD, not `current` — a
+                // no-chord gap between two chords must not hide the change.
+                if let Some(prev) = self.last_chord {
+                    if prev != cur {
+                        let (dist, dir) = fifths_travel(prev.root, cur.root);
+                        self.root_motion = dist;
+                        self.root_dir = dir;
+                        self.change_env = 1.0;
+                        self.rhythm_acc += 1.0;
+                    }
+                }
+                self.last_chord = Some(cur);
+            }
             self.current = self.candidate;
         }
+        let rhythm_target = (self.rhythm_acc / RHYTHM_FULL).clamp(0.0, 1.0);
+        self.rhythm += (rhythm_target - self.rhythm) * RHYTHM_SMOOTH;
 
         ChordFrame {
             quality: self.current.map(|c| c.quality.as_u8()).unwrap_or(0),
             prl_move: self.prl_move.as_u8(),
             prl_env: self.prl_env,
+            root: self.last_chord.map(|c| c.root).unwrap_or(0),
+            change_env: self.change_env,
+            root_motion: self.root_motion,
+            root_dir: self.root_dir,
+            rhythm: self.rhythm,
         }
     }
 }
@@ -297,5 +379,105 @@ mod tests {
             env = t.update(&cmin).prl_env;
         }
         assert_eq!(env, 0.0, "P/R/L accent relaxes when steady");
+    }
+
+    /// Hold `chroma` until the tracker commits it; returns the commit frame.
+    fn commit(t: &mut ChordTracker, chroma: &[f32; 12]) -> ChordFrame {
+        let mut f = ChordFrame::default();
+        for _ in 0..SWITCH_FRAMES {
+            f = t.update(chroma);
+        }
+        f
+    }
+
+    #[test]
+    fn fifths_travel_measures_harmonic_distance_and_side() {
+        assert_eq!(fifths_travel(0, 0), (0, 0), "same root");
+        assert_eq!(fifths_travel(0, 7), (1, 1), "C→G is one step sharpward");
+        assert_eq!(fifths_travel(0, 5), (1, -1), "C→F is one step flatward");
+        assert_eq!(fifths_travel(0, 2), (2, 1), "C→D is two fifths up");
+        assert_eq!(fifths_travel(0, 9), (3, 1), "C→A is three fifths up");
+        assert_eq!(fifths_travel(0, 3), (3, -1), "C→Eb is three fifths down");
+        assert_eq!(fifths_travel(0, 6), (6, 0), "the tritone has no side");
+        assert_eq!(fifths_travel(11, 4), (1, -1), "wraps the octave: B→E");
+    }
+
+    #[test]
+    fn everyday_chord_changes_fire_the_change_envelope_with_root_motion() {
+        let mut t = ChordTracker::default();
+        let first = commit(&mut t, &triad(0, ChordQuality::Major));
+        assert_eq!(first.root, 0);
+        assert_eq!(first.change_env, 0.0, "the first chord heard is not a change");
+
+        // C → F: a plain diatonic move the P/R/L layer ignores entirely.
+        let to_f = commit(&mut t, &triad(5, ChordQuality::Major));
+        assert_eq!(to_f.root, 5, "root follows the progression");
+        assert_eq!(to_f.prl_env, 0.0, "not a P/R/L move");
+        assert!(to_f.change_env > 0.9, "but it IS a change: {}", to_f.change_env);
+        assert_eq!((to_f.root_motion, to_f.root_dir), (1, -1), "one fifth flatward");
+
+        // F → G: a whole step = two fifths sharpward.
+        let to_g = commit(&mut t, &triad(7, ChordQuality::Major));
+        assert_eq!((to_g.root_motion, to_g.root_dir), (2, 1));
+
+        // Holding the chord lets the accent relax to exactly zero.
+        let mut held = to_g;
+        for _ in 0..120 {
+            held = t.update(&triad(7, ChordQuality::Major));
+        }
+        assert_eq!(held.change_env, 0.0, "accent relaxes on a held chord");
+        assert_eq!(held.root, 7, "root holds");
+    }
+
+    #[test]
+    fn a_no_chord_gap_neither_hides_nor_invents_a_change() {
+        let mut t = ChordTracker::default();
+        commit(&mut t, &triad(0, ChordQuality::Major));
+        // Drop to silence long enough to commit "no chord" and spend the env.
+        let mut gap = ChordFrame::default();
+        for _ in 0..120 {
+            gap = t.update(&[0.0; 12]);
+        }
+        assert_eq!(gap.quality, 0, "no chord in the gap");
+        assert_eq!(gap.root, 0, "root is held through the gap");
+        // Same chord returns: nothing changed.
+        let back = commit(&mut t, &triad(0, ChordQuality::Major));
+        assert_eq!(back.change_env, 0.0, "C → silence → C is not a change");
+        // A different chord after another gap still registers.
+        for _ in 0..120 {
+            t.update(&[0.0; 12]);
+        }
+        let moved = commit(&mut t, &triad(9, ChordQuality::Minor));
+        assert!(moved.change_env > 0.9, "C → silence → Am is a change");
+        assert_eq!((moved.root_motion, moved.root_dir), (3, 1));
+    }
+
+    #[test]
+    fn harmonic_rhythm_rises_with_busy_changes_and_settles_on_a_held_chord() {
+        let mut t = ChordTracker::default();
+        let prog = [0usize, 5, 7, 9];
+        // Slow: one change every ~4 s at 60 fps.
+        let mut slow = 0.0;
+        for bar in 0..8 {
+            for _ in 0..240 {
+                slow = t.update(&triad(prog[bar % 4], ChordQuality::Major)).rhythm;
+            }
+        }
+        // Fast: one change every ~0.5 s.
+        let mut t = ChordTracker::default();
+        let mut fast = 0.0;
+        for bar in 0..64 {
+            for _ in 0..30 {
+                fast = t.update(&triad(prog[bar % 4], ChordQuality::Major)).rhythm;
+            }
+        }
+        assert!(slow < 0.3, "slow progression reads calm: {slow}");
+        assert!(fast > 0.7, "busy progression reads busy: {fast}");
+        // Park on one chord: the rhythm drains.
+        let mut parked = fast;
+        for _ in 0..1800 {
+            parked = t.update(&triad(0, ChordQuality::Major)).rhythm;
+        }
+        assert!(parked < 0.05, "held chord drains the rhythm: {parked}");
     }
 }

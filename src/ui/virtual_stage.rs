@@ -32,6 +32,7 @@ use crate::emerge::{
     FixtureHousing, FixtureIntentState, FixtureKind, FixtureOverride, FixtureOverrides,
     FixturePatch, FixtureProfile, SegmentChannels, SegmentPattern, StageVec3, StageViewPreset,
     StageViewPresetKind, StageVisualKind, Truss, TrussAxis, TrussKind, VenueKind,
+    MOVER_PAN_WINDOW_DEG, MOVER_TILT_WINDOW_DEG,
 };
 use crate::render::RenderPipeline;
 
@@ -1763,6 +1764,32 @@ fn aim_target(
     }
 }
 
+/// Beam length for a mover with no operator-set throw.
+const MOVER_AUTO_THROW: f32 = 10.0;
+
+/// Where a moving head's beam ends right now, and how squarely it lands
+/// (1 = on the floor, 0 = out in open air).
+///
+/// The live pan/tilt TURN the beam about the head, by real angles around its
+/// mounting aim: 0.5 is the aim itself and the ends of the range are half the
+/// travel window either side. So a head at rest still points exactly where it
+/// was placed, and a head sent up visibly points up — the old landing-point
+/// wiggle moved the far end of the beam about a metre whatever the tilt did.
+///
+/// The beam stops where it meets the floor. Aimed above that, it runs out to
+/// a fixed reach in the air; the landing fades out as the floor recedes, so
+/// there is no pop where a rising beam lets go of the deck.
+fn mover_beam_end(fx: &FixturePatch, pos: V3, pan: f32, tilt: f32, min_z: f32) -> (V3, f32) {
+    let tilt_deg = fx.rotation.x + (tilt - 0.5) * MOVER_TILT_WINDOW_DEG;
+    let pan_deg = fx.rotation.y + (pan - 0.5) * MOVER_PAN_WINDOW_DEG;
+    let d = aim_dir(tilt_deg, pan_deg);
+    let air_reach = (fixture_throw(fx).unwrap_or(MOVER_AUTO_THROW) * 1.6).clamp(12.0, 45.0);
+    let floor_reach = if d.z < -1e-3 { (pos.z - min_z).max(0.0) / -d.z } else { f32::INFINITY };
+    let reach = floor_reach.min(air_reach);
+    let landed = ((air_reach - floor_reach) / (air_reach * 0.2)).clamp(0.0, 1.0);
+    (V3::new(pos.x + d.x * reach, pos.y + d.y * reach, pos.z + d.z * reach), landed)
+}
+
 /// Hit-test the aim handle of `owner` (the panel-selected fixture) at screen `pos`.
 /// Returns the fixture index when within grab range and the fixture is aimable.
 fn aim_handle_hit(
@@ -2569,23 +2596,10 @@ fn draw_fixture(
         StageVisualKind::Beam => {
             let pan = st.map(|x| x.pan).unwrap_or(0.5);
             let tilt = st.map(|x| x.tilt).unwrap_or(0.5);
-            let off = yaw_offset(
-                pitch_offset(
-                    V3::new((pan - 0.5) * 6.0, 1.2, (0.4 + tilt * 2.6).min(pos.z) - pos.z),
-                    tilt_deg,
-                ),
-                pan_deg,
-            );
-            // Same offset with the sweep at rest (pan/tilt intent = 0.5), so a placed
-            // beam keeps its live pan/tilt dance *around* the spot it was dropped on.
-            let off_neutral = yaw_offset(
-                pitch_offset(
-                    V3::new(0.0, 1.2, 1.7_f32.min(pos.z) - pos.z),
-                    tilt_deg,
-                ),
-                pan_deg,
-            );
-            let target = aim_target(fx, pos, off, off_neutral, tilt_deg, pan_deg, 0.04);
+            // The head turns about its mounting aim by the live pan/tilt, so
+            // it rests on the spot it was dropped on and climbs off the floor
+            // when the choreography sends it up.
+            let (target, _) = mover_beam_end(fx, pos, pan, tilt, 0.04);
             if let Some(t) = cam.screen(target, rect) {
                 // Tight near-parallel column. Zoom only slightly opens it — a
                 // beam stays collimated even wide-open, unlike a wash.
@@ -2607,23 +2621,10 @@ fn draw_fixture(
             let pan = st.map(|x| x.pan).unwrap_or(0.5);
             let tilt = st.map(|x| x.tilt).unwrap_or(0.5);
             let rot_phase = st.map(|x| x.gobo_rotation).unwrap_or(0.0);
-            let off = yaw_offset(
-                pitch_offset(
-                    V3::new((pan - 0.5) * 4.0, -0.4 - tilt * 2.4, -pos.z),
-                    tilt_deg,
-                ),
-                pan_deg,
-            );
-            // Sweep at rest (pan/tilt intent = 0.5) so a placed gobo/GalaxyJet keeps
-            // sweeping *around* its dropped spot.
-            let off_neutral = yaw_offset(
-                pitch_offset(
-                    V3::new(0.0, -1.6, -pos.z),
-                    tilt_deg,
-                ),
-                pan_deg,
-            );
-            let target = aim_target(fx, pos, off, off_neutral, tilt_deg, pan_deg, 0.0);
+            // Same head model as the beam arm. `landed` fades the projected
+            // pool out as the cone lifts off the floor: a gobo only shows
+            // where it meets a surface, in the air it is just the cone.
+            let (target, landed) = mover_beam_end(fx, pos, pan, tilt, 0.0);
             if let Some(t) = cam.screen(target, rect) {
                 // Mid cone — wider than a beam, tighter than a wash. Zoom
                 // scales the projected gobo pool.
@@ -2637,16 +2638,18 @@ fn draw_fixture(
                 {
                     p.add(b);
                 }
-                p.add(soft_disc(t, r * 1.2, tint(color, 0.05 + dim * 0.20)));
-                p.circle_stroke(t, r, Stroke::new(1.4, tint(color, 0.10 + dim * 0.60)));
-                // gobo break-up: two crossed slits
-                let slot = st.map(|x| x.gobo_slot).unwrap_or(0) as f32;
-                // gobo_rotation spins the break-up pattern.
-                let ang = slot * 0.5 + rot_phase * TAU;
-                for k in 0..2 {
-                    let a = ang + k as f32 * FRAC_PI_2;
-                    let d = Vec2::angled(a) * r;
-                    p.line_segment([t - d, t + d], Stroke::new(1.2, tint(Color32::BLACK, 0.5)));
+                if landed > 0.01 {
+                    p.add(soft_disc(t, r * 1.2, tint(color, (0.05 + dim * 0.20) * landed)));
+                    p.circle_stroke(t, r, Stroke::new(1.4, tint(color, (0.10 + dim * 0.60) * landed)));
+                    // gobo break-up: two crossed slits
+                    let slot = st.map(|x| x.gobo_slot).unwrap_or(0) as f32;
+                    // gobo_rotation spins the break-up pattern.
+                    let ang = slot * 0.5 + rot_phase * TAU;
+                    for k in 0..2 {
+                        let a = ang + k as f32 * FRAC_PI_2;
+                        let d = Vec2::angled(a) * r;
+                        p.line_segment([t - d, t + d], Stroke::new(1.2, tint(Color32::BLACK, 0.5 * landed)));
+                    }
                 }
             }
             p.add(soft_disc(body, s * 0.9, tint(color, 0.06 + dim * 0.6)));
@@ -3233,9 +3236,7 @@ fn draw_segment_panel(
                     // Tiny deterministic alpha jitter per dot so the matrix
                     // doesn't look like a perfect computer grid — real LED
                     // panels show small per-LED variation.
-                    let h = ((sx as u32) * 7919 + (sy as u32) * 104729
-                        + (seg_i as u32) * 2654435761)
-                        & 0xff;
+                    let h = dot_jitter_hash(sx, sy, seg_i);
                     let jitter = h as f32 / 255.0 * 0.12 - 0.06;
                     let a = (0.45 + cell_lum * 0.55 + jitter).clamp(0.15, 1.0);
                     if cell_lum > 0.6 || flash_on {
@@ -3267,6 +3268,19 @@ fn draw_segment_panel(
         show_labels,
     );
     Some((body, hit_r))
+}
+
+/// Per-dot byte (0-255) for the LED-matrix alpha jitter: a fixed scramble of
+/// the dot's sub-grid position and its cell index. The multiplier on the cell
+/// index is a hash constant that only works by wrapping — a plain `*` runs past
+/// `u32::MAX` from the third cell on, which a debug build turns into a panic
+/// the moment a multi-cell panel lights up.
+fn dot_jitter_hash(sx: usize, sy: usize, seg_i: usize) -> u32 {
+    (sx as u32)
+        .wrapping_mul(7919)
+        .wrapping_add((sy as u32).wrapping_mul(104_729))
+        .wrapping_add((seg_i as u32).wrapping_mul(2_654_435_761))
+        & 0xff
 }
 
 fn draw_fixture_label(p: &egui::Painter, pos: Pos2, label: &str, show: bool) {
@@ -3379,6 +3393,13 @@ fn fixture_color(
         }
         // 2. Color-wheel fixture (no RGB) — decode the wheel slot to a hue.
         if has_wheel {
+            // The profile resolved a real gel: show that gel. Lifted to full
+            // brightness — a dark gel still throws a bright beam of its colour,
+            // and the beam's level is drawn from the dimmer separately.
+            if let Some(rgb) = s.wheel_rgb {
+                let peak = rgb[0].max(rgb[1]).max(rgb[2]).max(1e-3);
+                return Color32::from_rgb(u8f(rgb[0] / peak), u8f(rgb[1] / peak), u8f(rgb[2] / peak));
+            }
             return color_wheel_hue(s.color_wheel);
         }
         // 3. White / dimmer-only fixture — open white when it has a dimmer.
@@ -3566,6 +3587,43 @@ mod tests {
                 assert!(dp.abs() < 0.01, "pan {pan} -> {p2}");
             }
         }
+    }
+
+    /// A mover's beam turns about the head by real angles: at rest it lands
+    /// exactly on the spot it was placed, a raised tilt lifts it off the floor
+    /// and into the air, and a beam that meets the floor stops there.
+    #[test]
+    fn a_mover_beam_rests_on_its_spot_and_climbs_with_tilt() {
+        let mut patch = DmxPatch::demo_virtual_stage(0, 1);
+        let fx = &mut patch.fixtures[0];
+        // The concert 7R: 11 m up, aimed 42.5° off straight down, thrown to the floor.
+        fx.position = StageVec3 { x: -1.7, y: 0.9, z: 11.3 };
+        fx.rotation = StageVec3 { x: 42.5, y: 86.0, z: 0.0 };
+        fx.scale.y = 15.4;
+        let pos = V3::of(fx.position);
+
+        let (rest, landed) = mover_beam_end(fx, pos, 0.5, 0.5, 0.04);
+        let placed = aim_handle_world(fx);
+        let off = ((rest.x - placed.x).powi(2) + (rest.y - placed.y).powi(2) + (rest.z - placed.z).powi(2)).sqrt();
+        assert!(off < 0.3, "at rest the beam is on its placed spot: {off} m off");
+        assert!(landed > 0.9 && rest.z < 0.2, "and that spot is on the floor");
+
+        // Tilt up through the levels: the far end rises above the head.
+        let (crowd, _) = mover_beam_end(fx, pos, 0.5, 0.74, 0.04);
+        let (sky, in_air) = mover_beam_end(fx, pos, 0.5, 0.95, 0.04);
+        assert!(crowd.z > rest.z + 5.0, "the crowd level is well off the floor: z {}", crowd.z);
+        assert!(sky.z > pos.z + 5.0, "the sky level points above the head: z {} vs head {}", sky.z, pos.z);
+        assert_eq!(in_air, 0.0, "nothing lands when the beam is in the air");
+
+        // Steeper than the placed aim: still stops at the floor, never below it.
+        let (down, hit) = mover_beam_end(fx, pos, 0.5, 0.35, 0.04);
+        assert!((down.z - 0.04).abs() < 1e-3 && hit == 1.0, "stops on the deck: z {}", down.z);
+
+        // Pan swings the landing sideways across the stage, not a metre.
+        let (left, _) = mover_beam_end(fx, pos, 0.2, 0.5, 0.04);
+        let (right, _) = mover_beam_end(fx, pos, 0.8, 0.5, 0.04);
+        let swing = ((left.x - right.x).powi(2) + (left.y - right.y).powi(2)).sqrt();
+        assert!(swing > 5.0, "pan covers real ground: {swing} m");
     }
 
     /// `scale.y` doubles as the per-fixture throw, with the default 1.0 meaning

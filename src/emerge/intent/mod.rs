@@ -8,6 +8,7 @@
 mod fixture_brain;
 mod intent;
 mod lfo;
+mod movement;
 mod oscillator;
 
 pub use fixture_brain::{
@@ -15,8 +16,16 @@ pub use fixture_brain::{
     FixtureFamily, FixtureFamilyCapabilities, FixtureFrameContext, FixtureGenreProfile,
     PhaseState, ShowClockSnapshot, ShowClockSource, TopologyState,
 };
-pub use intent::{render_fixture_intent, renders_as_galaxy_effect, segment_rgbw, FixtureIntentState};
+pub use intent::{
+    render_fixture_intent, render_fixture_intent_aimed, renders_as_galaxy_effect, segment_rgbw,
+    FixtureIntentState,
+};
 pub use lfo::{add_clamped, LfoBankConfig, LfoModulation, LfoTarget, LfoWaveform};
+pub use movement::{
+    choose_look, choose_posture, figure_point, FigurePoint, MotionContext, MoveFigure, MoveLook,
+    MovePosture, MovementDirector, MovementFrame, MoverSlot, MOVER_PAN_WINDOW_DEG,
+    MOVER_TILT_WINDOW_DEG,
+};
 pub use oscillator::{
     add_bipolar, bipolar_wave, OscillatorBinding, OscillatorFrameSnapshot, OscillatorInterval,
     OscillatorShape,

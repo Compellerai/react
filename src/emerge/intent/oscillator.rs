@@ -251,25 +251,38 @@ impl OscillatorFrameSnapshot {
         // cycle into [0, ratio) and snapped to 0 at every parent boundary —
         // the "2-beat triangle breath" was actually a per-beat sawtooth.
         // Integer ratios are unchanged (`fract((k + p) * n) == fract(n * p)`).
-        let unwrapped = match binding.interval {
+        let phase = self.cycle_phase(binding.interval, ratio, binding.phase);
+        bipolar_wave(binding.shape, phase, binding.pulse_width)
+    }
+
+    /// Raw carrier phase for something running `ratio` cycles per `interval`,
+    /// offset by `phase` — the clock position before any waveform is applied.
+    /// The mover figures read this directly (a circle needs sine AND cosine of
+    /// one phase; a bounce needs the beat position itself), so they stay
+    /// locked to the same beat/bar/phrase grid as every `sample()` binding.
+    ///
+    /// Fractional ratios run off the UNWRAPPED interval count (see
+    /// [`Self::wave_at_ratio`]); with no absolute beat source it falls back
+    /// to the wrapped phases.
+    pub fn cycle_phase(&self, interval: OscillatorInterval, ratio: f32, phase: f32) -> f32 {
+        let unwrapped = match interval {
             OscillatorInterval::Beat => self.beats_abs,
             OscillatorInterval::Bar => self.bars_abs,
             OscillatorInterval::Phrase => self.phrases_abs,
         };
-        let phase = if unwrapped > 0.0 {
-            ((unwrapped * ratio as f64 + binding.phase as f64).fract()) as f32
+        if unwrapped > 0.0 {
+            ((unwrapped * ratio as f64 + phase as f64).fract()) as f32
         } else {
             // No absolute beat source (old producers / default snapshots):
             // the original wrapped-phase path, so nothing breaks — fractional
             // ratios keep their historical truncating behaviour here.
-            let base = match binding.interval {
+            let base = match interval {
                 OscillatorInterval::Beat => self.beat_phase,
                 OscillatorInterval::Bar => self.bar_phase,
                 OscillatorInterval::Phrase => self.phrase_phase,
             };
-            (base * ratio + binding.phase).fract()
-        };
-        bipolar_wave(binding.shape, phase, binding.pulse_width)
+            (base * ratio + phase).fract()
+        }
     }
 
     /// Integer phrase ordinal for phrase-quantized discrete choices (gobo slot,

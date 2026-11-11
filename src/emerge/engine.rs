@@ -685,6 +685,20 @@ impl LightingEngine {
             cue_snap.chord_quality = self.cached_chord.quality;
             cue_snap.chord_prl_move = self.cached_chord.prl_move;
             cue_snap.chord_prl_env = self.cached_chord.prl_env;
+            // The rest of what the chord tracker hears: root, the any-change
+            // accent (with how far and which way the root moved), harmonic
+            // rhythm — and where the harmony sits on the circle of fifths.
+            // These drive the mover steering + the colour reaction to a
+            // progression. The transient is suppressed on a stalled feed like
+            // `onset` (a frozen accent must not replay).
+            cue_snap.chord_root = self.cached_chord.root;
+            cue_snap.chord_change_env =
+                if stale_silent { 0.0 } else { self.cached_chord.change_env };
+            cue_snap.chord_root_motion = self.cached_chord.root_motion;
+            cue_snap.chord_root_dir = self.cached_chord.root_dir;
+            cue_snap.harmonic_rhythm = self.cached_chord.rhythm;
+            cue_snap.tonnetz_x = self.cached_tonnetz.x;
+            cue_snap.tonnetz_y = self.cached_tonnetz.y;
             let (an_hue, an_sat, an_on) = self.cached_all_notes;
             cue_snap.all_notes_hue = an_hue;
             cue_snap.all_notes_sat = an_sat;
