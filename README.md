@@ -327,9 +327,10 @@ The streaming system supports both GStreamer and FFmpeg encoding backends:
 
 ### Licensing and Entitlements
 
-Value-driven entitlements derived from HMAC-SHA256 signed license blobs fetched from compeller.ai:
+Value-driven entitlements derived from Ed25519-signed license blobs fetched from compeller.ai:
 
 - **License Blob**: Server signs plan limits as concrete values (render_scale, max_fps, watermark flag, etc.)
+- **Public-Key Verification**: The app holds only the Ed25519 public key (`LICENSE_PUBLIC_KEYS` in `src/auth/license.rs`); the private key never leaves the server, so nothing in the source or a built app can sign a license
 - **Offline Grace**: Blob cached in SQLite; valid for 7 days without server refresh
 - **Derivation Over Gating**: Values used directly in computations (resolution multiplier, shader uniform), not boolean checks — patching a single gate won't help
 - **Entitlements**:
@@ -679,7 +680,7 @@ react/
 │   │
 │   ├── auth/
 │   │   ├── mod.rs           # Auth state machine, Entitlements (account_id, watermark, plan)
-│   │   ├── license.rs       # HMAC-signed license blob verification + offline cache
+│   │   ├── license.rs       # Ed25519 license blob verification + offline cache
 │   │   └── connected.rs     # Connected account state (YouTube, etc.)
 │   │
 │   └── ui/
@@ -963,7 +964,7 @@ raw_energy    - Pre-normalization energy for silence detection
 
 ```bash
 # Self-contained .app, no private settings required
-./build.sh --no-license-key
+./build.sh
 ```
 
 The bundle is ad-hoc signed, which is enough to run it on the Mac that built
@@ -972,9 +973,11 @@ Compeller; that tooling and its credentials are not part of this repository.
 
 ### Private settings
 
-The license verification key and the development API host are never stored in
-this repository. They are read from an untracked `.env.local` — copy
-`.env.example` and fill it in.
+The development API host is never stored in this repository. It is read from
+an untracked `.env.local` — copy `.env.example` and fill it in.
+
+License blobs need no private setting: they are verified with a public key
+that is part of the source.
 
 ## Keyboard Shortcuts
 

@@ -1,4 +1,4 @@
-# Secrets, signing identity, license key (NEVER commit) — see .env.example
+# Secrets, signing identity (NEVER commit) — see .env.example
 .env
 .env.local
 .env.*.local

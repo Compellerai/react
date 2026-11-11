@@ -19,10 +19,15 @@ be constant — only the text/colors change.
 
 ## Never commit private material
 
-This repository is public. Signing identity, notarization credentials, the
-license verification key and the development API host live only in the
-untracked `.env.local` (template: `.env.example`), loaded by `scripts/env.sh`.
-Do not add them, internal hostnames, or the NDI SDK to any tracked file.
+This repository is public. Signing identity, notarization credentials and the
+development API host live only in the untracked `.env.local`, loaded by
+`scripts/env.sh`. Do not add them, internal hostnames, or the NDI SDK to any
+tracked file.
+
+License blobs are verified with Ed25519 public keys committed in
+`src/auth/license.rs`. Public keys belong in the source; the matching private
+key exists only on the license server and must never appear here — not in
+code, tests, fixtures or docs. Tests generate throwaway keys at run time.
 
 Release packaging is private too. `build.sh` stops at an ad-hoc signed `.app`;
 official releases are signed, notarized and turned into an installer by an

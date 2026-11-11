@@ -20,7 +20,7 @@ fi
 export PATH="/opt/homebrew/bin:$PATH"
 export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:/opt/homebrew/opt/ffmpeg/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 
-# Private settings: license key, dev API host. Untracked — see .env.example.
+# Private settings (the dev API host). Untracked — see .env.example.
 if [ -f "$REPO_ROOT/.env.local" ]; then
     set -a
     # shellcheck disable=SC1091

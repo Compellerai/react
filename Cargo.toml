@@ -106,9 +106,11 @@ fs2 = "0.4"
 # HTTP client for video sync
 ureq = { version = "2.10", features = ["json"] }
 
-# SHA-256 checksums for upload verification + HMAC for license blob verification
+# SHA-256 checksums for upload verification
 sha2 = "0.10"
-hmac = "0.12"
+
+# Ed25519 signature verification for license blobs (public key only)
+ed25519-dalek = "3.0.0"
 
 # UDP socket options for Pro DJ Link
 socket2 = { version = "0.5", features = ["all"] }  # "all" exposes set_reuse_port (needed to co-bind UDP 20808 with Ableton Link)

@@ -3,14 +3,12 @@
 #
 # Usage:
 #   ./build.sh                     # Build the .app bundle
-#   ./build.sh --no-license-key    # Community build, no private settings
 #
 # The bundle is ad-hoc signed, which is enough to run it on the Mac that built
 # it. Distributing it to other Macs needs a Developer ID signature and Apple
 # notarization; neither is part of this repository.
 #
-# Private settings come from .env.local (untracked; see .env.example):
-#   REACT_LICENSE_HMAC_KEY         license verification key
+# No private settings are needed.
 
 set -e
 
@@ -25,33 +23,26 @@ echo "=== REACT by Compeller.ai - Build ==="
 echo ""
 
 # Parse arguments
-ALLOW_NO_LICENSE_KEY=false
 for arg in "$@"; do
     case $arg in
         --dev)
             # Accepted for old scripts: every build here is the ad-hoc signed one.
             ;;
         --no-license-key)
-            ALLOW_NO_LICENSE_KEY=true
+            # Accepted for old scripts. License blobs are verified with a public
+            # key that lives in the source, so there is no key to leave out.
             ;;
         --help|-h)
             echo "Usage: ./build.sh [OPTIONS]"
             echo ""
             echo "Options:"
-            echo "  --no-license-key  Build without REACT_LICENSE_HMAC_KEY"
             echo "  --help            Show this help message"
+            echo ""
+            echo "--dev and --no-license-key are accepted for old scripts and do nothing."
             exit 0
             ;;
     esac
 done
-
-# A distributable build without the license key cannot verify signed plan
-# entitlements — refuse unless that is explicitly intended.
-if [ -z "$REACT_LICENSE_HMAC_KEY" ] && [ "$ALLOW_NO_LICENSE_KEY" = false ]; then
-    echo "ERROR: REACT_LICENSE_HMAC_KEY is not set."
-    echo "Set it in $SCRIPT_DIR/.env.local, or pass --no-license-key to build without it."
-    exit 1
-fi
 
 # Set deployment target
 export MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET:-12.0}
