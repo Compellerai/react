@@ -5,7 +5,11 @@
 //! the lighting cue each frame and holds it for the egui renderer to draw.
 
 use crate::emerge::PhaseState;
-use crate::emerge::{render_fixture_intent, render_fixture_intent_aimed, FixtureIntentState};
+use crate::emerge::{
+    render_fixture_intent, render_fixture_intent_aimed, render_fixture_intent_placed,
+    FixtureIntentState, StageLayout,
+};
+use crate::emerge::contracts::segments_for_profile;
 use super::mapping::{
     apply_global_overrides, apply_per_fixture_overrides, bar_energy_gate, expand_sections,
     is_gigbar_35, refine_with_profile, MoverRanking, ProfileMap,
@@ -135,6 +139,9 @@ impl VirtualStageBackend {
         // sweep groups and figure slots on-screen as they do on the rig, and
         // heads sharing an address level from the one aim the wire uses.
         let movers = MoverRanking::new(self.patch.fixtures.iter());
+        // And the same stage layout, so a scene's chases and sweeps cross the
+        // on-screen rig where they cross the real one.
+        let layout = snapshot.scene.directed.then(|| StageLayout::new(self.patch.fixtures.iter()));
         // Same bar gate the wire applies (collapse the dense bar in quiet).
         // A held manual override (BLINDER/STROBE/UV) bypasses it exactly as the
         // wire does (mapping.rs render path) — the operator pressed the button,
@@ -204,12 +211,31 @@ impl VirtualStageBackend {
                 FixtureIntentState::default()
             } else {
                 let (mover_ordinal, level_aim) = movers.place(fixture);
-                let mut it = render_fixture_intent_aimed(
-                    snapshot, fixture, &osc, gate, mover_ordinal, movers.count(), level_aim,
-                );
+                let profile = profiles.get(&fixture.id);
+                let mut it = match &layout {
+                    Some(layout) => {
+                        // A pixel fixture's cells are drawn off the wire; its
+                        // own intent must be the one the wire computed.
+                        let cells = profile
+                            .map_or(0, |p| segments_for_profile(p, fixture.start_address).len());
+                        render_fixture_intent_placed(
+                            snapshot,
+                            fixture,
+                            &osc,
+                            gate,
+                            mover_ordinal,
+                            movers.count(),
+                            level_aim,
+                            &layout.place(fixture, cells),
+                        )
+                    }
+                    None => render_fixture_intent_aimed(
+                        snapshot, fixture, &osc, gate, mover_ordinal, movers.count(), level_aim,
+                    ),
+                };
                 // Same wheel resolution as the wire, so the preview shows the
                 // gel the rig is actually on.
-                refine_with_profile(&mut it, fixture, profiles.get(&fixture.id));
+                refine_with_profile(&mut it, fixture, profile);
                 apply_global_overrides(&mut it, fixture, snapshot, true);
                 apply_per_fixture_overrides(&mut it, fixture, overrides, any_solo);
                 apply_uv_preview(&mut it);

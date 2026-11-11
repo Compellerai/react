@@ -5,6 +5,7 @@
 //! per-frame, oscillator-driven fixture state between CueSnapshot and DMX.
 
 use super::movement::{dynamics_lift, settle, MotionContext, MoverSlot};
+use super::scene::{Part, SceneFrame, Shade, StagePlace};
 use super::oscillator::{
     add_bipolar, OscillatorBinding, OscillatorFrameSnapshot,
     OscillatorInterval, OscillatorShape,
@@ -46,6 +47,10 @@ pub struct FixtureIntentState {
     /// The colour of the wheel slot the profile resolved, when it did — lets
     /// the preview show the gel the rig is really on.
     pub wheel_rgb: Option<[f32; 3]>,
+    /// The fixture is asked for its open beam — white, no gel — rather than
+    /// the colour in `wheel_hue`. Only a scene asks (white beams over a
+    /// coloured stage); the DMX layer finds the wheel's open slot.
+    pub wheel_open: bool,
 }
 
 // ── EALP B1: journey-phase lighting macro ───────────────────────────────────
@@ -392,6 +397,31 @@ pub fn render_fixture_intent_aimed(
     mover_count: usize,
     level_aim_deg: f32,
 ) -> FixtureIntentState {
+    let place = StagePlace::for_mover(mover_ordinal, mover_count);
+    render_fixture_intent_placed(
+        snapshot, fixture, osc, gate, mover_ordinal, mover_count, level_aim_deg, &place,
+    )
+}
+
+/// [`render_fixture_intent_aimed`] for a fixture whose place across the stage
+/// is known (see `StageLayout`).
+///
+/// The place matters only while a scene director is running
+/// (`snapshot.scene.directed`): a scene's chases travel across the stage and
+/// its transitions sweep across it, so each fixture has to know where it
+/// stands. Without a director the place is not read and the intent is what it
+/// always was.
+#[allow(clippy::too_many_arguments)]
+pub fn render_fixture_intent_placed(
+    snapshot: &CueSnapshot,
+    fixture: &FixturePatch,
+    osc: &OscillatorFrameSnapshot,
+    gate: Option<&ShowBrainFrame>,
+    mover_ordinal: usize,
+    mover_count: usize,
+    level_aim_deg: f32,
+    place: &StagePlace,
+) -> FixtureIntentState {
     // COM-499: effect fixtures EMERGE with the music — energy-gated dimmer + a
     // static-band colour + a music-driven gobo spin — instead of sitting always-on.
     // Two flavours (see `EffectKind` / `effect_dimmer`): the Obsession is the refined
@@ -399,6 +429,11 @@ pub fn render_fixture_intent_aimed(
     // and keeps its own pan/tilt sweep. The 7R movers are neither.
     let effect = effect_kind(fixture);
     let is_effect = effect.is_some();
+    // The part this fixture plays in the scene, when a director is running.
+    // `None` is the rig as it was before scenes: no director, or a lane a
+    // scene leaves alone (lasers, strobes).
+    let scene = &snapshot.scene;
+    let part = if scene.directed { scene_part(fixture, effect) } else { None };
     let mut intent = FixtureIntentState {
         dimmer: match effect {
             Some(kind) => effect_dimmer(snapshot, osc, kind),
@@ -409,12 +444,19 @@ pub fn render_fixture_intent_aimed(
         tilt: tilt_for_fixture(snapshot, fixture.role, osc, mover_ordinal, mover_count, level_aim_deg),
         zoom: 0.35 + snapshot.energy * 0.45,
         focus: 0.45 + snapshot.stability * 0.35,
-        color_wheel: if is_effect {
-            effect_color_wheel(snapshot)
-        } else {
-            color_wheel_for_fixture(snapshot)
+        // Under a scene every wheel follows the director, which turns them
+        // only while the beams are dark; otherwise they follow the pitch.
+        color_wheel: match part {
+            Some(Part::Effect) => effect_color_wheel_at(beam_semitone(scene)),
+            Some(Part::Beam) => scene_color_wheel(scene, place.ring()),
+            _ if is_effect => effect_color_wheel(snapshot),
+            _ => color_wheel_for_fixture(snapshot),
         },
-        gobo_slot: gobo_slot_for_fixture(snapshot, osc),
+        gobo_slot: match part {
+            Some(Part::Beam) => scene.gobo_slot,
+            Some(Part::Effect) => (beam_semitone(scene) + scene.gobo_slot) % 8,
+            _ => gobo_slot_for_fixture(snapshot, osc),
+        },
         // COM-499 Stage 2: a static effect spins with the music — energy speed,
         // lattice-commit direction (Ch7 gobo today; Ch8 mirror pending the
         // verified 8-ch profile).
@@ -426,9 +468,22 @@ pub fn render_fixture_intent_aimed(
         // Prism flourishes on the DROP/release (when the beams slam back in), not
         // on the tense build — tension now retreats the beams, so prism-on-tension
         // would fire while they're meant to be gone.
-        prism: if snapshot.trigger_blinder || snapshot.drop_impact > 0.45 { 1.0 } else { 0.0 },
+        prism: match part {
+            // The scene says when the prism is in (the drop's look has it).
+            Some(Part::Beam) => {
+                if scene.beam.prism || snapshot.trigger_blinder { 1.0 } else { 0.0 }
+            }
+            _ => {
+                if snapshot.trigger_blinder || snapshot.drop_impact > 0.45 { 1.0 } else { 0.0 }
+            }
+        },
         laser_macro: laser_macro_for_fixture(snapshot, fixture.role, fixture.visual_kind, osc),
-        wheel_hue: wheel_hue_for_fixture(snapshot, mover_ordinal),
+        wheel_hue: match part {
+            Some(Part::Beam) => scene_wheel_hue(scene, place.ring()),
+            Some(Part::Effect) => scene.beam_hue,
+            _ => wheel_hue_for_fixture(snapshot, mover_ordinal),
+        },
+        wheel_open: matches!(part, Some(Part::Beam)) && scene.beam.white,
         ..Default::default()
     };
 
@@ -436,9 +491,27 @@ pub fn render_fixture_intent_aimed(
     // dissonance-bloom fan, so each fixture lands on a different point of the arc.
     let addr_key = (fixture.universe as u32) * 1024 + fixture.start_address as u32;
     let fixture_phase = (addr_key as f32 * 0.618_034).fract();
-    let (r, g, b, w) = color_for_fixture(
-        snapshot, fixture.role, fixture.visual_kind, intent.dimmer, fixture_phase, osc,
-    );
+    let (r, g, b, w) = match part {
+        Some(part) => {
+            let val = body_value(snapshot, intent.dimmer);
+            let [r, g, b, w, level] = scene_rgbwl(
+                snapshot, fixture, osc, part, val, fixture_phase, place.u, place.rank, place.ring(), addr_key,
+            );
+            // The look's level and its chase. A fixture with pixel cells takes
+            // them cell by cell on the wire (`scene_cell_rgbw`), so its own
+            // intent stays at the level the music gave it. Beams and effects
+            // also go dark for the moment their wheels turn.
+            let mut scale = if place.celled { 1.0 } else { level };
+            if matches!(part, Part::Beam | Part::Effect) {
+                scale *= scene.beam_dip;
+            }
+            intent.dimmer *= scale;
+            (r * scale, g * scale, b * scale, w * scale)
+        }
+        None => color_for_fixture(
+            snapshot, fixture.role, fixture.visual_kind, intent.dimmer, fixture_phase, osc,
+        ),
+    };
     intent.red = r;
     intent.green = g;
     intent.blue = b;
@@ -470,6 +543,23 @@ pub fn render_fixture_intent_aimed(
         intent.green *= settled;
         intent.blue *= settled;
         intent.white *= settled;
+    }
+
+    // The drop's flash: the colour body and the beams jump toward full white
+    // and fall back into the drop's look. After the settle, so it is the one
+    // thing that reaches the top; the director sizes it by how big the
+    // passage is, and a manual blinder still goes over it.
+    if matches!(part, Some(Part::Body | Part::Beam)) && scene.flash > 0.0 {
+        let flash = scene.flash.clamp(0.0, 1.0) * SCENE_FLASH_DEPTH;
+        for channel in [
+            &mut intent.dimmer,
+            &mut intent.red,
+            &mut intent.green,
+            &mut intent.blue,
+            &mut intent.white,
+        ] {
+            *channel += (1.0 - *channel) * flash;
+        }
     }
 
     // Show-brain gate: intense lanes go dark when the brain rules them
@@ -1295,25 +1385,9 @@ fn color_for_fixture(
     // intentionally fixed, so they skip it. `val` (energy-driven) is untouched, so
     // a noisy drop still rips at full brightness while only the colour relaxes.
     if !matches!(visual_kind, StageVisualKind::Strobe | StageVisualKind::Laser) {
-        sat *= trust_saturation(snapshot);
-        // EALP B3: a quaternion lattice lock-in (qc_strength) is the "colour punch"
-        // companion to the mover accent — lerp saturation toward full so colours pop
-        // on lattice events. Lerp (not multiply) so it shows at any base; qc=0 no-op.
-        // Distinct axis from trust (coherence floor): trust relaxes, qc punches.
-        sat += (1.0 - sat) * snapshot.qc_strength.clamp(0.0, 1.0) * QC_SAT_PUNCH;
-        // EALP B5: a voice-leading SURPRISE (harmonic jump) pops saturation toward
-        // full — distinct trigger from the B3 lattice-lock pop; brightness untouched.
-        sat += (1.0 - sat) * tonnetz_surprise(snapshot) * TONNETZ_SURPRISE_SAT;
-        // All-notes colour: a spread chord washes a touch whiter (the blend
-        // reads as a mix, not a wrong single hue); a single note stays vivid.
-        if snapshot.all_notes_color {
-            sat *= 0.7 + 0.3 * snapshot.all_notes_sat;
-        }
+        sat = harmonic_saturation(snapshot, sat);
     }
-    let val = (0.35 + snapshot.energy * 0.42 + dimmer * 0.32 + snapshot.drop_impact * 0.12
-        // A chord change blooms the colour body for a moment.
-        + chord_accent(snapshot) * CHORD_BLOOM)
-        .clamp(0.0, 1.0);
+    let val = body_value(snapshot, dimmer);
     let (r, g, b) = hsv_to_rgb(hue, sat, val);
     let white = if snapshot.trigger_blinder || snapshot.auto_blinder_active {
         0.8 + snapshot.energy * 0.2
@@ -1326,6 +1400,241 @@ fn color_for_fixture(
         (1.0 - sat) * val * 0.35 * (1.0 + temp * TEMP_WHITE_DEPTH)
     };
     (r, g, b, white.clamp(0.0, 1.0))
+}
+
+/// What the harmonic field does to a colour's saturation, from a starting
+/// `sat`: coherence relaxes it, a lattice lock-in and a harmonic surprise
+/// punch it, a spread all-notes chord washes it a little.
+fn harmonic_saturation(snapshot: &CueSnapshot, mut sat: f32) -> f32 {
+    // EALP B2: harmonic coherence (trust) — see `trust_saturation`.
+    sat *= trust_saturation(snapshot);
+    // EALP B3: a quaternion lattice lock-in (qc_strength) is the "colour punch"
+    // companion to the mover accent — lerp saturation toward full so colours pop
+    // on lattice events. Lerp (not multiply) so it shows at any base; qc=0 no-op.
+    // Distinct axis from trust (coherence floor): trust relaxes, qc punches.
+    sat += (1.0 - sat) * snapshot.qc_strength.clamp(0.0, 1.0) * QC_SAT_PUNCH;
+    // EALP B5: a voice-leading SURPRISE (harmonic jump) pops saturation toward
+    // full — distinct trigger from the B3 lattice-lock pop; brightness untouched.
+    sat += (1.0 - sat) * tonnetz_surprise(snapshot) * TONNETZ_SURPRISE_SAT;
+    // All-notes colour: a spread chord washes a touch whiter (the blend
+    // reads as a mix, not a wrong single hue); a single note stays vivid.
+    if snapshot.all_notes_color {
+        sat *= 0.7 + 0.3 * snapshot.all_notes_sat;
+    }
+    sat
+}
+
+/// How bright a fixture's colour is: energy, its own dimmer, the drop.
+fn body_value(snapshot: &CueSnapshot, dimmer: f32) -> f32 {
+    (0.35 + snapshot.energy * 0.42 + dimmer * 0.32 + snapshot.drop_impact * 0.12
+        // A chord change blooms the colour body for a moment.
+        + chord_accent(snapshot) * CHORD_BLOOM)
+        .clamp(0.0, 1.0)
+}
+
+// ── Scenes ──────────────────────────────────────────────────────────────────
+// With a scene director running (`snapshot.scene.directed`) the rig's colour
+// and levels come from the scene (see `scene.rs`): a palette held for the
+// phrase and laid out across the stage, a chase, and the crossfade into the
+// next look. The harmony still picks the palette (the director follows the
+// key) and its small motions — temperature, the dissonance fan, the Tonnetz
+// drift, the chord kicks — still play on top, as do the dimmer's own energy
+// response, the journey and the settle. What a scene replaces is the part
+// that used to jump: the per-look hue rotation, the two-bar hue saw and the
+// pitch-class steps.
+
+/// Saturation ceilings under a scene. A held palette wants to be rich, so
+/// these sit above the undirected ones, and consonance eases them less.
+const SCENE_BODY_SAT: f32 = 0.94;
+const SCENE_BEAM_SAT: f32 = 0.96;
+const SCENE_SAT_CONSONANCE: f32 = 0.12;
+/// How far the drop's flash takes a fixture toward full white.
+const SCENE_FLASH_DEPTH: f32 = 0.9;
+
+/// The part a fixture plays in a scene, or `None` for the lanes a scene
+/// leaves alone: lasers and strobes are gated by the show brain, not dressed.
+fn scene_part(fixture: &FixturePatch, effect: Option<EffectKind>) -> Option<Part> {
+    if effect.is_some() {
+        return Some(Part::Effect);
+    }
+    if matches!(fixture.role, FixtureRole::Strobe) {
+        return None;
+    }
+    match fixture.visual_kind {
+        StageVisualKind::Wash | StageVisualKind::LedPanel => Some(Part::Body),
+        StageVisualKind::Beam | StageVisualKind::Gobo => Some(Part::Beam),
+        StageVisualKind::Laser | StageVisualKind::Strobe => None,
+    }
+}
+
+/// The colour the beams' wheels are on, as a pitch class (0-11).
+fn beam_semitone(scene: &SceneFrame) -> u8 {
+    ((scene.beam_hue * 12.0).round() as i64).rem_euclid(12) as u8
+}
+
+/// The gel a beam asks for under a scene (0-1). Every beam shares the scene's
+/// colour unless the look has them spell the triad — then the centre of the
+/// stage takes the root and the groups either side the fifth and the third,
+/// mirrored about the centre line (`ring` is `StagePlace::ring`). Built from what the director last turned
+/// the wheels to, so it only ever changes while the beams are dark.
+fn scene_wheel_hue(scene: &SceneFrame, ring: usize) -> f32 {
+    let voice = if !scene.beam.voices {
+        0.0
+    } else {
+        match ring % 3 {
+            1 => 7.0 / 12.0,
+            2 if scene.beam_minor => 3.0 / 12.0,
+            2 => 4.0 / 12.0,
+            _ => 0.0,
+        }
+    };
+    (scene.beam_hue + voice).rem_euclid(1.0)
+}
+
+/// The colour-wheel byte for a beam with no profile to look a gel up in: the
+/// open slot (0 on every wheel this app has met) for white beams, otherwise
+/// the pitch formula on the scene's colour.
+fn scene_color_wheel(scene: &SceneFrame, ring: usize) -> u8 {
+    if scene.beam.white {
+        return 0;
+    }
+    let semitone = ((scene_wheel_hue(scene, ring) * 12.0).round() as i64).rem_euclid(12) as u8;
+    (semitone * 21).min(255)
+}
+
+/// [`effect_color_wheel`] on the scene's colour rather than the live pitch.
+fn effect_color_wheel_at(semitone: u8) -> u8 {
+    ((semitone % 12) * 11).min(139)
+}
+
+/// The Tonnetz drift, folded so it has no seam: `tonnetz_hue` wraps from 1
+/// back to 0, and the undirected sum jumps a tenth of a turn when it does.
+fn tonnetz_drift(snapshot: &CueSnapshot) -> f32 {
+    let folded = 1.0 - (2.0 * snapshot.tonnetz_hue.rem_euclid(1.0) - 1.0).abs();
+    folded * TONNETZ_HUE_DEPTH * snapshot.tonnetz_strength
+}
+
+/// A fixture's colour under one look. `shade` is what the look gives it (see
+/// `SceneFrame::shade`); `val` how bright the colour is. `on_gel` is a beam on
+/// a colour wheel: its colour is the gel, with none of the harmony's small
+/// motions, which a wheel cannot follow.
+fn scene_color(
+    snapshot: &CueSnapshot,
+    part: Part,
+    val: f32,
+    fixture_phase: f32,
+    shade: &Shade,
+    on_gel: bool,
+) -> [f32; 4] {
+    let temp = tonal_temperature(snapshot.major_smooth)
+        + chord_temperature(snapshot) * CHORD_TEMP_DEPTH;
+    let hue = if on_gel {
+        shade.hue
+    } else {
+        shade.hue
+            + snapshot.balance * 0.06
+            + temp * TEMP_HUE_DEPTH
+            + dissonance_fan(snapshot.stability, fixture_phase)
+            + tonnetz_drift(snapshot)
+            + prl_hue_kick(snapshot)
+            + chord_hue_kick(snapshot)
+    }
+    .rem_euclid(1.0);
+    let ceiling = if matches!(part, Part::Body) { SCENE_BODY_SAT } else { SCENE_BEAM_SAT };
+    let base = ceiling - snapshot.balance.clamp(0.0, 1.0) * SCENE_SAT_CONSONANCE;
+    let sat = (harmonic_saturation(snapshot, base) * shade.sat).clamp(0.0, 1.0);
+    let (r, g, b) = hsv_to_rgb(hue, sat, val);
+    // Bleach toward white at the same brightness, and bring the white emitter
+    // up with it where the fixture has one.
+    let bleach = shade.white.clamp(0.0, 1.0);
+    let mix = |c: f32| c + (val - c) * bleach;
+    let white = if snapshot.trigger_blinder || snapshot.auto_blinder_active {
+        0.8 + snapshot.energy * 0.2
+    } else {
+        (1.0 - sat) * val * 0.35 * (1.0 + temp * TEMP_WHITE_DEPTH) + bleach * val
+    };
+    [mix(r), mix(g), mix(b), white.clamp(0.0, 1.0)]
+}
+
+/// Colour and level for a fixture (or one pixel cell of it) at stage position
+/// `u`, crossfaded over every look in play: `[r, g, b, w, level]`.
+///
+/// Each look is rendered whole — its own palette, its own chase — and the
+/// results are blended channel by channel, the way a console fades between
+/// two cues. Blending the looks' numbers instead would send a hue the long
+/// way round the wheel through colours neither look contains.
+#[allow(clippy::too_many_arguments)]
+fn scene_rgbwl(
+    snapshot: &CueSnapshot,
+    fixture: &FixturePatch,
+    osc: &OscillatorFrameSnapshot,
+    part: Part,
+    val: f32,
+    fixture_phase: f32,
+    u: f32,
+    rank: usize,
+    ring: usize,
+    seed: u32,
+) -> [f32; 5] {
+    let frame = &snapshot.scene;
+    // A beam with no colour mixing is on whatever gel the director last
+    // turned its wheel to, whichever looks are fading: a wheel cannot fade.
+    let on_gel = matches!(part, Part::Beam) && fixture.channels.red.is_none();
+    frame.blend(u, |scene| {
+        let mut shade = frame.shade(scene, snapshot, osc, part, u, rank, seed);
+        if on_gel {
+            shade.hue = scene_wheel_hue(frame, ring);
+            if frame.beam.white {
+                shade.white = 1.0;
+            }
+        } else if matches!(part, Part::Beam) && scene.beam.white {
+            // A colour-mixing beam can fade to white with the look.
+            shade.white = 1.0;
+        }
+        let [r, g, b, w] = scene_color(snapshot, part, val, fixture_phase, &shade, on_gel);
+        [r, g, b, w, shade.level]
+    })
+}
+
+/// One pixel cell of a fixture under the scene — what `segment_rgbw` is to the
+/// undirected rig. `dimmer` is the fixture's own level after every override
+/// (master, style ceiling, trim, mute), so the cell obeys them all; the cell
+/// adds the look's level and its place in the chase, which is why a wave runs
+/// across the cells of the whole stage rather than restarting on every bar.
+pub fn scene_cell_rgbw(
+    snapshot: &CueSnapshot,
+    fixture: &FixturePatch,
+    osc: &OscillatorFrameSnapshot,
+    dimmer: f32,
+    place: &StagePlace,
+    cell: usize,
+    count: usize,
+) -> (f32, f32, f32, f32) {
+    let part = scene_part(fixture, effect_kind(fixture)).unwrap_or(Part::Body);
+    let addr_key = (fixture.universe as u32) * 1024 + fixture.start_address as u32;
+    let fixture_phase = (addr_key as f32 * 0.618_034).fract();
+    let seed = addr_key.wrapping_mul(31).wrapping_add(cell as u32 + 1);
+    let [r, g, b, w, level] = scene_rgbwl(
+        snapshot,
+        fixture,
+        osc,
+        part,
+        1.0,
+        fixture_phase,
+        place.cell_u(cell, count),
+        place.cell_rank(cell, count),
+        place.ring(),
+        seed,
+    );
+    // The drop's flash, cell by cell (the fixture's dimmer already carries it).
+    let flash = if matches!(part, Part::Body | Part::Beam) {
+        snapshot.scene.flash.clamp(0.0, 1.0) * SCENE_FLASH_DEPTH
+    } else {
+        0.0
+    };
+    let lift = |c: f32| c + (1.0 - c) * flash;
+    let k = dimmer.clamp(0.0, 1.0) * lift(level.clamp(0.0, 1.0));
+    (lift(r) * k, lift(g) * k, lift(b) * k, lift(w) * k)
 }
 
 /// Per-segment color for a pixel bar. Each of the `count` cells gets its own

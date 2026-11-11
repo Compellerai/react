@@ -23,7 +23,7 @@ pub use harmony::{
 };
 pub use intent::{
     add_bipolar, add_clamped, bipolar_wave, render_fixture_intent, render_fixture_intent_aimed,
-    renders_as_galaxy_effect,
+    render_fixture_intent_placed, renders_as_galaxy_effect, scene_cell_rgbw,
     segment_rgbw, ArcSignals, ArcState, CueLaneIntent, CuePriority, FixtureBrain,
     FixtureBrainContext, FixtureFamily, FixtureFamilyCapabilities, FixtureFrameContext,
     FixtureGenreProfile, FixtureIntentState, LfoBankConfig, LfoModulation, LfoTarget, LfoWaveform,
@@ -31,6 +31,10 @@ pub use intent::{
     OscillatorBinding, MOVER_PAN_WINDOW_DEG, MOVER_TILT_WINDOW_DEG,
     OscillatorFrameSnapshot, OscillatorInterval, OscillatorShape, PhaseState, ShowClockSnapshot,
     ShowClockSource, TopologyState,
+};
+pub use intent::{
+    scene, scene_for, BeamLook, Look, Scene, SceneDirector, SceneFrame, SceneKind, Section,
+    StageLayout, StagePlace, Transition,
 };
 pub use cue::{
     apply_cue_bindings, family_for, link_clock, prolink_clock, ActiveCue, AutoBlinderPhase,

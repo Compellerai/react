@@ -177,6 +177,10 @@ pub struct DmxManager {
     /// rotation; its frame is stamped onto the snapshot so the wire and the
     /// preview move identically.
     movement: crate::emerge::MovementDirector,
+    /// The look the rig holds and the transitions between looks: one director
+    /// for the whole rig, beside the movement director and on the same phrase
+    /// grid, so the colour and the figure change together.
+    scene: crate::emerge::SceneDirector,
     /// Integrated autopilot tightening-chase cycle and the show-clock beat it
     /// was last advanced at (`lighting_cue::advance_auto_chase`): the head
     /// must accelerate as tension shortens the period, and only an integrator
@@ -299,6 +303,7 @@ impl DmxManager {
             local_cue_seq: 0,
             look_index: 0,
             movement: crate::emerge::MovementDirector::new(),
+            scene: crate::emerge::SceneDirector::new(),
             auto_chase_cycle: 0.0,
             auto_chase_last_beat: 0.0,
             look_last_polarity: 0,
@@ -1333,15 +1338,25 @@ impl DmxManager {
             brain.clock.tempo_bpm,
             dt_s,
         );
+        // The scene: which look the rig is holding, and how far the next one
+        // has come in. Same inputs and the same frame as the movement.
+        let scene = self.scene.tick(
+            snapshot,
+            brain.arc_state,
+            brain.clock.beat,
+            brain.clock.tempo_bpm,
+            dt_s,
+        );
         // Shadow `snapshot` with a clone carrying the look_index + chase cycle
-        // + movement frame, so the renderer + virtual-stage preview consume
-        // them with no further call-site plumbing.
+        // + movement and scene frames, so the renderer + virtual-stage preview
+        // consume them with no further call-site plumbing.
         let snapshot = &{
             let mut s = snapshot.clone();
             s.look_index = self.look_index;
             s.auto_chase_cycle = self.auto_chase_cycle;
             s.strobe_on = strobe_on;
             s.movement = movement;
+            s.scene = scene;
             s
         };
 
@@ -1799,6 +1814,7 @@ mod tests {
             local_cue_seq: 0,
             look_index: 0,
             movement: crate::emerge::MovementDirector::new(),
+            scene: crate::emerge::SceneDirector::new(),
             auto_chase_cycle: 0.0,
             auto_chase_last_beat: 0.0,
             look_last_polarity: 0,

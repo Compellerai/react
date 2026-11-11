@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use crate::emerge::{FixtureFamily, PhaseState};
 use crate::emerge::{
-    render_fixture_intent, render_fixture_intent_aimed, segment_rgbw, FixtureIntentState,
+    render_fixture_intent, render_fixture_intent_aimed, render_fixture_intent_placed,
+    scene_cell_rgbw, segment_rgbw, FixtureIntentState, StageLayout, StagePlace,
 };
 use crate::emerge::{apply_cue_bindings, ActiveCue, CueApplyReport};
 use crate::emerge::OscillatorFrameSnapshot;
@@ -109,6 +110,13 @@ pub fn render_dmx_frame_at(
     // their own place in a figure. Computed once over this universe before
     // the fixture loop.
     let movers = MoverRanking::new(patch.fixtures_for_universe(patch.universe));
+    // Where each address stands across the stage — what a scene's chases
+    // travel along and its transitions sweep across. Only a directed frame
+    // reads it, so only a directed frame builds it.
+    let layout = snapshot
+        .scene
+        .directed
+        .then(|| StageLayout::new(patch.fixtures_for_universe(patch.universe)));
 
     for fixture in patch.fixtures_for_universe(patch.universe) {
         // A Screen is a placeable video surface, not a light — it never emits
@@ -225,16 +233,6 @@ pub fn render_dmx_frame_at(
             continue;
         }
 
-        let (mover_ordinal, level_aim) = movers.place(fixture);
-        let mut intent = render_fixture_intent_aimed(
-            snapshot,
-            fixture,
-            &osc,
-            gate,
-            mover_ordinal,
-            movers.count(),
-            level_aim,
-        );
         // Profile (when resolved) is needed by step_chase bindings whose
         // `values_from` path pulls steps off the fixture's gobo/prism/etc
         // detail; passing `None` makes step_chase fall through to a
@@ -242,6 +240,32 @@ pub fn render_dmx_frame_at(
         // ONCE here and its cell count handed to `apply_cue_bindings`, which
         // previously re-derived it per segment binding per frame.
         let profile = profiles.get(&fixture.id);
+        let segments = profile
+            .map(|p| segments_for_profile(p, fixture.start_address))
+            .unwrap_or_default();
+        let (mover_ordinal, level_aim) = movers.place(fixture);
+        let place = layout.as_ref().map(|l| l.place(fixture, segments.len()));
+        let mut intent = match &place {
+            Some(place) => render_fixture_intent_placed(
+                snapshot,
+                fixture,
+                &osc,
+                gate,
+                mover_ordinal,
+                movers.count(),
+                level_aim,
+                place,
+            ),
+            None => render_fixture_intent_aimed(
+                snapshot,
+                fixture,
+                &osc,
+                gate,
+                mover_ordinal,
+                movers.count(),
+                level_aim,
+            ),
+        };
         // Land the colour wheel on a real gel from the profile's slot table
         // (before the cue bindings, so a cue still has the last word).
         refine_with_profile(&mut intent, fixture, profile);
@@ -249,9 +273,6 @@ pub fn render_dmx_frame_at(
         // written for (also before the cue bindings: a cue's own pan/tilt is an
         // explicit DMX position and goes out as authored).
         scale_motion_to_window(&mut intent, fixture, profile);
-        let segments = profile
-            .map(|p| segments_for_profile(p, fixture.start_address))
-            .unwrap_or_default();
         let overlay =
             apply_cue_bindings(&mut intent, fixture, profile, segments.len(), cues, beats, reports);
         // Manual global triggers + Global Brightness act last so they win
@@ -268,7 +289,19 @@ pub fn render_dmx_frame_at(
             stamp_profile_statics(&mut frame, fixture, p);
         }
         if segments.len() >= 2 {
-            apply_segmented_fixture(&mut frame, fixture, intent, snapshot, &segments, overlay.segments.as_deref(), beats, overrides.get(&fixture.id), any_solo);
+            apply_segmented_fixture(
+                &mut frame,
+                fixture,
+                intent,
+                snapshot,
+                &segments,
+                overlay.segments.as_deref(),
+                beats,
+                overrides.get(&fixture.id),
+                any_solo,
+                &osc,
+                place.as_ref(),
+            );
         } else {
             // A cue's exact step wins; otherwise the gobo slot resolves to a
             // real wheel position when the profile lists them.
@@ -371,6 +404,9 @@ impl MoverRanking {
 /// and pale tints are a "white", not a hue the harmony can ask for.
 const WHEEL_MIN_SAT: f32 = 0.35;
 const WHEEL_MIN_VAL: f32 = 0.20;
+/// A slot this pale and this bright is the wheel's open white.
+const WHEEL_OPEN_MAX_SAT: f32 = 0.12;
+const WHEEL_OPEN_MIN_VAL: f32 = 0.85;
 /// Between two gels at (near) the same hue distance, prefer the more vivid —
 /// expressed in turns of hue, so it only ever breaks near-ties.
 const WHEEL_VIVID_BIAS: f32 = 0.03;
@@ -452,10 +488,32 @@ pub(crate) fn refine_with_profile(
     else {
         return;
     };
-    if let Some((byte, rgb)) = nearest_wheel_slot(slots, intent.wheel_hue) {
+    // White beams: the wheel's open slot, when the table has one. A wheel
+    // with no white on it falls through to the nearest gel as usual.
+    let slot = if intent.wheel_open { open_wheel_slot(slots) } else { None }
+        .or_else(|| nearest_wheel_slot(slots, intent.wheel_hue));
+    if let Some((byte, rgb)) = slot {
         intent.color_wheel = byte;
         intent.wheel_rgb = Some(rgb);
     }
+}
+
+/// The open (white) slot of a colour wheel — `(wire byte, white)`. A slot
+/// counts as open when the profile names it so, or gives it a colour that is
+/// bright and nearly neutral; of several, the first on the wheel.
+fn open_wheel_slot(slots: &[ChannelSlot]) -> Option<(u8, [f32; 3])> {
+    let neutral = |slot: &&ChannelSlot| {
+        slot.rgb.is_some_and(|c| {
+            let (_, s, v) = rgb_hsv([c[0] as f32, c[1] as f32, c[2] as f32]);
+            s < WHEEL_OPEN_MAX_SAT && v > WHEEL_OPEN_MIN_VAL
+        })
+    };
+    let named = |slot: &&ChannelSlot| label_has(&slot.name, "open") || label_has(&slot.name, "white");
+    let enabled = || slots.iter().filter(|s| s.enabled);
+    enabled()
+        .find(named)
+        .or_else(|| enabled().find(neutral))
+        .map(|slot| (slot_byte(slot), [1.0, 1.0, 1.0]))
 }
 
 /// The 0-1 wire value that puts the gobo wheel on a real position for the
@@ -889,6 +947,9 @@ fn apply_segmented_fixture(
     beats: f64,
     ov: FixtureOverride,
     any_solo: bool,
+    osc: &OscillatorFrameSnapshot,
+    // Where the fixture stands across the stage, when a scene is directing.
+    place: Option<&StagePlace>,
 ) {
     use crate::emerge::cue::lighting_cue::{auto_segment_kind, eval_segment, operator_segment_kind, SegmentKind};
 
@@ -949,6 +1010,10 @@ fn apply_segmented_fixture(
         Kind { kind: SegmentKind, dim: f32, tint: Option<HarmonicTint> },
         /// Show-brain gradient/chase fallback (~1 in 5 looks).
         Brain,
+        /// The scene: every cell takes its own place in the rig-wide look, so
+        /// a wave or a sweep crosses the cells of the whole stage and one
+        /// look crossfades into the next instead of the pattern being cut.
+        Scene(&'a StagePlace),
     }
     // The shared global-white override wins over the cue/autopilot look, the
     // same as the flat path — no separate blinder/strobe logic here (that's
@@ -978,11 +1043,15 @@ fn apply_segmented_fixture(
             }
         }
         None => {
-            // COM-499 autonomous segment look: ~1 in 5 looks keep the
-            // show-brain gradient/chase; the rest run the slice-3 tension
-            // engine — the segment effect escalates with tension_bank and
-            // releases on the drop. Both dim with the fixture (intent.dimmer).
-            if snapshot.look_index % 5 == 0 {
+            // With a scene director running, the autopilot look is the
+            // scene's. Without one it is the COM-499 autonomous segment look:
+            // ~1 in 5 looks keep the show-brain gradient/chase; the rest run
+            // the slice-3 tension engine — the segment effect escalates with
+            // tension_bank and releases on the drop. All dim with the fixture
+            // (intent.dimmer).
+            if let Some(place) = place.filter(|_| snapshot.scene.directed) {
+                CellSrc::Scene(place)
+            } else if snapshot.look_index % 5 == 0 {
                 CellSrc::Brain
             } else {
                 CellSrc::Kind {
@@ -1029,6 +1098,9 @@ fn apply_segmented_fixture(
                     (c[0] * dim, c[1] * dim, c[2] * dim, 0.0)
                 }
                 CellSrc::Brain => segment_rgbw(snapshot, intent.dimmer, i, count),
+                CellSrc::Scene(place) => {
+                    scene_cell_rgbw(snapshot, fixture, osc, intent.dimmer, place, i, count)
+                }
             }
         };
         frame.set_channel(seg.red, to_dmx(r));
@@ -2095,6 +2167,8 @@ mod tests {
                 0.0,
                 FixtureOverride::default(),
                 false,
+                &OscillatorFrameSnapshot::from_cue(snap),
+                None,
             );
             frame
         };
@@ -2264,6 +2338,7 @@ mod tests {
             apply_segmented_fixture(
                 &mut frame, &fixture, FixtureIntentState::default(), snap, &segments,
                 None, 0.0, FixtureOverride::default(), false,
+                &OscillatorFrameSnapshot::from_cue(snap), None,
             );
             frame
         };
@@ -3069,6 +3144,7 @@ mod profile_wire_tests {
     use super::*;
     use crate::emerge::ArcState;
     use crate::emerge::profiles::load_atla_fixture_profile;
+    use crate::emerge::contracts::SegmentChannels;
     use crate::emerge::{MoveFigure, MoveLook, MovementFrame};
 
     const BEAM_7R: &str =
@@ -3677,40 +3753,66 @@ mod profile_wire_tests {
         rig
     }
 
-    /// Play `song` (after `lead_in_s` of a previous full track, so the set has
-    /// a scale) and average what the rig did in each passage, leaving out the
-    /// first six seconds of each as the transition. `dynamics_on = false`
-    /// holds dynamics open: the rig as it was before dynamics existed.
-    fn replay_song(song: &[Passage], lead_in_s: f32, dynamics_on: bool) -> Vec<PassageStats> {
-        use crate::audio::ControlSignalNormalizer;
-        use crate::emerge::{ClockInputs, LightingStyle, MovementDirector, PhaseState, ShowBrain};
-        use crate::render::LightingMetrics;
+    /// Plays a scripted song at the level the analyzer reports, a frame at a
+    /// time: everything upstream of the show brain.
+    struct SongPlayer {
+        normalizer: crate::audio::ControlSignalNormalizer,
+        t: f32,
+        frame_no: u64,
+        energy: f32,
+        energy_slow: f32,
+        bands: (f32, f32, f32),
+        tension: f32,
+        tension_bank: f32,
+        bass_pump: f32,
+        polarity_env: f32,
+    }
 
+    impl SongPlayer {
         const FPS: f32 = 30.0;
-        const DT: f32 = 1.0 / FPS;
+        const DT: f32 = 1.0 / Self::FPS;
         const BPM: f32 = 124.0;
-        const SETTLE_S: f32 = 6.0;
 
-        let rig = concert_rig();
-        let movers = MoverRanking::new(rig.iter());
-        let mut brain = ShowBrain::new();
-        brain.set_style(LightingStyle::Energetic);
-        brain.dynamics_held_open = !dynamics_on;
-        let mut director = MovementDirector::new();
-        let mut normalizer = ControlSignalNormalizer::new();
+        fn new() -> Self {
+            Self {
+                normalizer: crate::audio::ControlSignalNormalizer::new(),
+                t: 0.0,
+                frame_no: 0,
+                energy: 0.0,
+                energy_slow: 0.0,
+                bands: (0.0, 0.0, 0.0),
+                tension: 0.3,
+                tension_bank: 0.0,
+                bass_pump: 0.0,
+                polarity_env: 0.0,
+            }
+        }
 
-        let lead_in = passage("previous track", lead_in_s, EVERYTHING_IN, true, 0.35, 0.80, Shape::Steady);
-        let mut stats = Vec::new();
-        let (mut t, mut frame_no) = (0.0f32, 0u64);
-        let (mut energy, mut energy_slow, mut bands) = (0.0f32, 0.0f32, (0.0f32, 0.0f32, 0.0f32));
-        let (mut tension, mut tension_bank, mut bass_pump, mut polarity_env) = (0.3f32, 0.0f32, 0.0f32, 0.0f32);
-        let mut last_pose: Option<(f32, f32)> = None;
-
-        for (index, p) in std::iter::once(&lead_in).chain(song.iter()).enumerate() {
-            let mut acc = PassageStats::default();
-            let frames = (p.secs * FPS) as usize;
-            for i in 0..frames {
-                let into = i as f32 * DT;
+        /// The next frame of passage `p`, `into` seconds into it: what the cue
+        /// engine and the analyzer hand the show brain.
+        fn next(
+            &mut self,
+            p: &Passage,
+            into: f32,
+            brain: &crate::emerge::ShowBrain,
+        ) -> (CueSnapshot, crate::render::LightingMetrics) {
+            use crate::render::LightingMetrics;
+            const DT: f32 = SongPlayer::DT;
+            const BPM: f32 = SongPlayer::BPM;
+            let Self {
+                normalizer,
+                t,
+                frame_no,
+                energy,
+                energy_slow,
+                bands,
+                tension,
+                tension_bank,
+                bass_pump,
+                polarity_env,
+            } = self;
+            let (t, frame_no) = (*t, *frame_no);
+            let (cue, metrics) = {
                 let along = into / p.secs;
                 let beat = (t * BPM / 60.0) as f64;
                 let beat_frac = beat.fract() as f32;
@@ -3731,15 +3833,15 @@ mod profile_wire_tests {
                 if frame_no % 5 == 0 {
                     let wobble = 0.85 + 0.30 * ((frame_no as f32 * 12.9898).sin() * 43_758.547).fract().abs();
                     let n = normalizer.normalize(bass * wobble, mid * wobble, high * wobble, rms * wobble);
-                    energy += (n.energy_vis - energy) * 0.6;
-                    bands = (n.bass, n.mid, n.high);
+                    *energy += (n.energy_vis - *energy) * 0.6;
+                    *bands = (n.bass, n.mid, n.high);
                 }
-                energy_slow += (energy - energy_slow) * 0.02;
+                *energy_slow += (*energy - *energy_slow) * 0.02;
                 let target_tension = if p.shape == Shape::Build { 0.45 + 0.40 * along } else { p.tension };
-                tension += (target_tension - tension) * 0.05;
+                *tension += (target_tension - *tension) * 0.05;
                 let bank_target = if p.shape == Shape::Build { 0.70 * along } else { 0.0 };
-                tension_bank += (bank_target - tension_bank) * if bank_target > tension_bank { 0.05 } else { 0.25 };
-                bass_pump = if onset && p.shape != Shape::Build { 1.0 } else { bass_pump * (-DT / 0.15).exp() };
+                *tension_bank += (bank_target - *tension_bank) * if bank_target > *tension_bank { 0.05 } else { 0.25 };
+                *bass_pump = if onset && p.shape != Shape::Build { 1.0 } else { *bass_pump * (-DT / 0.15).exp() };
                 // The cue engine holds the drop's impact while the energy stays up.
                 let drop_impact = if p.shape == Shape::Drop {
                     if into < 4.0 { 0.77 } else { 0.77 * (-(into - 4.0) / 0.8).exp() }
@@ -3748,7 +3850,10 @@ mod profile_wire_tests {
                 };
                 let quadrant = ((t / 9.0) as u32 % 4) as u8;
                 let flipped = (((t - DT).max(0.0) / 9.0) as u32 % 4) as u8 != quadrant;
-                polarity_env = if flipped { 1.0 } else { polarity_env * (-DT / 0.6).exp() };
+                *polarity_env = if flipped { 1.0 } else { *polarity_env * (-DT / 0.6).exp() };
+                let (energy, energy_slow, bands) = (*energy, *energy_slow, *bands);
+                let (tension, tension_bank) = (*tension, *tension_bank);
+                let (bass_pump, polarity_env) = (*bass_pump, *polarity_env);
 
                 let cue = CueSnapshot {
                     energy,
@@ -3799,6 +3904,44 @@ mod profile_wire_tests {
                     trust: 1.0,
                     ..LightingMetrics::default()
                 };
+                (cue, metrics)
+            };
+            self.t += DT;
+            self.frame_no += 1;
+            (cue, metrics)
+        }
+    }
+
+    /// Play `song` (after `lead_in_s` of a previous full track, so the set has
+    /// a scale) and average what the rig did in each passage, leaving out the
+    /// first six seconds of each as the transition. `dynamics_on = false`
+    /// holds dynamics open: the rig as it was before dynamics existed.
+    fn replay_song(song: &[Passage], lead_in_s: f32, dynamics_on: bool) -> Vec<PassageStats> {
+        use crate::emerge::{ClockInputs, LightingStyle, MovementDirector, PhaseState, ShowBrain};
+
+        const FPS: f32 = SongPlayer::FPS;
+        const DT: f32 = SongPlayer::DT;
+        const SETTLE_S: f32 = 6.0;
+
+        let rig = concert_rig();
+        let movers = MoverRanking::new(rig.iter());
+        let mut brain = ShowBrain::new();
+        brain.set_style(LightingStyle::Energetic);
+        brain.dynamics_held_open = !dynamics_on;
+        let mut director = MovementDirector::new();
+        let mut player = SongPlayer::new();
+
+        let lead_in = passage("previous track", lead_in_s, EVERYTHING_IN, true, 0.35, 0.80, Shape::Steady);
+        let mut stats = Vec::new();
+        let mut last_pose: Option<(f32, f32)> = None;
+
+        for (index, p) in std::iter::once(&lead_in).chain(song.iter()).enumerate() {
+            let mut acc = PassageStats::default();
+            let frames = (p.secs * FPS) as usize;
+            for i in 0..frames {
+                let into = i as f32 * DT;
+                let (cue, metrics) = player.next(p, into, &brain);
+                let energy = cue.energy;
                 let frame = brain.tick(&cue, &metrics, &ClockInputs::default());
                 let mut cue = cue;
                 cue.dynamics = brain.dynamics();
@@ -3846,8 +3989,6 @@ mod profile_wire_tests {
                     }
                 }
                 last_pose = Some(pose);
-                t += DT;
-                frame_no += 1;
             }
             if index > 0 {
                 let n = acc.frames.max(1.0);
@@ -3935,6 +4076,569 @@ mod profile_wire_tests {
                     s.arc()
                 );
             }
+        }
+    }
+
+    // ── The same song on the wire, with and without a scene director ───────
+    // Everything above measures intents. The scene tests read the DMX frame
+    // itself — the panel cells and the beams' wheel and dimmer bytes — on a
+    // rig laid out across a stage, because a scene is spatial: its chases
+    // travel and its transitions sweep.
+
+    const PANEL_8: &str =
+        include_str!("../../assets/nas-fixture-profiles/shehds-200w-rgb-strobe-light-8-segment.json");
+    const PANELS: usize = 6;
+    const CELLS: usize = 8;
+    const BEAM_GROUPS: usize = 4;
+
+    /// A festival stage in miniature: six eight-cell panels across the back,
+    /// four beam groups on the truss above them, a pair of GalaxyJets, a laser.
+    struct Stage {
+        patch: DmxPatch,
+        profiles: ProfileMap,
+        /// Every panel cell, in order across the stage.
+        cells: Vec<SegmentChannels>,
+        /// The beam groups, in order across the stage.
+        beams: Vec<FixturePatch>,
+        galaxy: FixturePatch,
+        laser: FixturePatch,
+    }
+
+    fn festival_stage() -> Stage {
+        let panel_profile = load_atla_fixture_profile(PANEL_8, Some("24 Channel")).expect("panel").profile;
+        let mut fixtures = Vec::new();
+        let mut profiles = ProfileMap::new();
+        let mut cells = Vec::new();
+        for i in 0..PANELS {
+            let start = 1 + 24 * i as u16;
+            // The concert stage maps only the last cell's RGB on this mode.
+            let mut fx = fixture(
+                &format!("panel{i}"),
+                start,
+                StageVisualKind::LedPanel,
+                ChannelMap {
+                    red: Some(start + 21),
+                    green: Some(start + 22),
+                    blue: Some(start + 23),
+                    ..ChannelMap::default()
+                },
+            );
+            fx.position = StageVec3 { x: -5.0 + 2.0 * i as f32, y: 3.0, z: 0.0 };
+            fx.mode = "24 Channel".into();
+            cells.extend(segments_for_profile(&panel_profile, start));
+            profiles.insert(fx.id.clone(), panel_profile.clone());
+            fixtures.push(fx);
+        }
+        assert_eq!(cells.len(), PANELS * CELLS);
+        let mut beams = Vec::new();
+        for i in 0..BEAM_GROUPS {
+            let mut head = beam(&format!("beam{i}"), 200 + 20 * i as u16);
+            head.position = StageVec3 { x: -4.5 + 3.0 * i as f32, y: 6.0, z: 0.0 };
+            head.rotation.x = 25.0;
+            profiles.insert(head.id.clone(), beam_profile());
+            beams.push(head.clone());
+            fixtures.push(head);
+        }
+        let mut galaxy = beam("galaxy", 300);
+        galaxy.profile_id = "a36a0e1c-a9e9-4978-a62d-06e66c7b1ac8".to_string();
+        galaxy.position = StageVec3 { x: 0.0, y: 1.0, z: 2.0 };
+        galaxy.rotation.x = 40.0;
+        fixtures.push(galaxy.clone());
+        let mut laser = fixture(
+            "laser",
+            330,
+            StageVisualKind::Laser,
+            ChannelMap { dimmer: Some(330), laser_macro: Some(331), ..ChannelMap::default() },
+        );
+        laser.role = FixtureRole::Strobe;
+        fixtures.push(laser.clone());
+        Stage { patch: patch(fixtures), profiles, cells, beams, galaxy, laser }
+    }
+
+    fn wire(frame: &DmxFrame, channel: Option<u16>) -> u8 {
+        channel.map_or(0, |ch| frame.data[ch as usize - 1])
+    }
+
+    impl Stage {
+        /// The colour of every panel cell on the wire, across the stage.
+        fn cell_colours(&self, frame: &DmxFrame) -> Vec<[f32; 3]> {
+            self.cells
+                .iter()
+                .map(|c| [c.red, c.green, c.blue].map(|ch| wire(frame, ch) as f32 / 255.0))
+                .collect()
+        }
+
+        /// `(dimmer, the gel the wheel is on)` for beam group `i`.
+        fn beam_light(&self, frame: &DmxFrame, i: usize) -> (f32, [f32; 3]) {
+            let head = &self.beams[i];
+            let dimmer = wire(frame, head.channels.dimmer) as f32 / 255.0;
+            let byte = wire(frame, head.channels.color_wheel);
+            let profile = &self.profiles[&head.id];
+            let gel = match profile_channel_at(profile, head, head.channels.color_wheel.unwrap())
+                .and_then(|c| c.detail.as_ref())
+            {
+                Some(ChannelDetail::ColorWheel { slots, .. }) => slot_holding(slots, byte)
+                    .and_then(|s| s.rgb)
+                    .map_or([0.4, 0.4, 0.4], |c| [c[0] as f32, c[1] as f32, c[2] as f32]),
+                _ => [0.4, 0.4, 0.4],
+            };
+            (dimmer, gel)
+        }
+    }
+
+    /// One frame of a show, as played.
+    struct ShowFrame<'a> {
+        /// Passage index into the song (the lead-in is not reported).
+        passage: usize,
+        /// Seconds into the passage.
+        into: f32,
+        arc: ArcState,
+        cue: &'a CueSnapshot,
+        dmx: &'a DmxFrame,
+    }
+
+    /// Play `song` through the shipping pipeline — show brain, movement
+    /// director, the manager's look rotation, and (when `directed`) the scene
+    /// director — and hand every rendered DMX frame to `each`.
+    ///
+    /// The harmony is scripted here: each passage has a tonal centre, and
+    /// every four bars the dominant pitch leaves it for two beats (a passing
+    /// chord), which a held palette has to sit through.
+    fn play_show(
+        stage: &Stage,
+        song: &[Passage],
+        lead_in_s: f32,
+        directed: bool,
+        mut each: impl FnMut(ShowFrame),
+    ) {
+        use crate::emerge::cue::lighting_cue::advance_auto_chase;
+        use crate::emerge::{ClockInputs, LightingStyle, MovementDirector, SceneDirector, ShowBrain};
+        const CENTRES: [(u8, f32); 7] =
+            [(0, 0.62), (0, 0.62), (5, 0.34), (5, 0.34), (0, 0.62), (7, 0.36), (7, 0.36)];
+
+        let mut brain = ShowBrain::new();
+        brain.set_style(LightingStyle::Energetic);
+        let mut movement = MovementDirector::new();
+        let mut scenes = SceneDirector::new();
+        let mut player = SongPlayer::new();
+        let (mut look_index, mut look_polarity, mut look_phrase, mut look_armed) = (0u32, 0u8, 0i64, true);
+        let (mut chase_cycle, mut chase_beat) = (0.0f64, 0.0f64);
+
+        let lead_in = passage("previous track", lead_in_s, EVERYTHING_IN, true, 0.35, 0.80, Shape::Steady);
+        for (index, p) in std::iter::once(&lead_in).chain(song.iter()).enumerate() {
+            let (centre, major) = if index == 0 { CENTRES[0] } else { CENTRES[(index - 1) % CENTRES.len()] };
+            for i in 0..(p.secs * SongPlayer::FPS) as usize {
+                let into = i as f32 * SongPlayer::DT;
+                let (mut cue, metrics) = player.next(p, into, &brain);
+                let frame = brain.tick(&cue, &metrics, &ClockInputs::default());
+                let beat = frame.clock.beat;
+                cue.dynamics = brain.dynamics();
+                cue.dominant_pc = if beat.rem_euclid(16.0) >= 14.0 { (centre + 7) % 12 } else { centre };
+                cue.major_smooth = major;
+                cue.tonnetz_strength = 0.5;
+                cue.tonnetz_hue = 0.3;
+
+                // The manager's look rotation and chase integrator, as they run today.
+                let phrase = (beat / 8.0).floor() as i64;
+                let drop_edge = cue.drop_impact > 0.6 && look_armed;
+                if cue.polarity_quadrant != look_polarity || phrase != look_phrase || drop_edge {
+                    look_index = look_index.wrapping_add(1);
+                }
+                look_polarity = cue.polarity_quadrant;
+                look_phrase = phrase;
+                if cue.drop_impact > 0.6 {
+                    look_armed = false;
+                } else if cue.drop_impact < 0.3 {
+                    look_armed = true;
+                }
+                (chase_cycle, chase_beat) = advance_auto_chase(chase_cycle, chase_beat, beat, cue.tension_bank);
+                cue.look_index = look_index;
+                cue.auto_chase_cycle = chase_cycle;
+
+                cue.movement =
+                    movement.tick(&cue, frame.arc_state, beat, frame.clock.tempo_bpm, SongPlayer::DT);
+                if directed {
+                    cue.scene =
+                        scenes.tick(&cue, frame.arc_state, beat, frame.clock.tempo_bpm, SongPlayer::DT);
+                }
+                let dmx = render_dmx_frame(&cue, &stage.patch, &stage.profiles, Some(&frame));
+                if index > 0 {
+                    each(ShowFrame { passage: index - 1, into, arc: frame.arc_state, cue: &cue, dmx: &dmx });
+                }
+            }
+        }
+    }
+
+    /// How far the colour of the panel wall moved between two frames, leaving
+    /// brightness out of it: each lit cell's colour is scaled to full, and the
+    /// result is the mean over the wall of the largest channel change. 0 is a
+    /// held palette; 1 is every cell swapping to an unrelated colour.
+    fn colour_travel(before: &[[f32; 3]], after: &[[f32; 3]]) -> Option<f32> {
+        const LIT: f32 = 0.08;
+        let (mut sum, mut lit) = (0.0f32, 0usize);
+        for (a, b) in before.iter().zip(after) {
+            let (pa, pb) = (a[0].max(a[1]).max(a[2]), b[0].max(b[1]).max(b[2]));
+            if pa < LIT || pb < LIT {
+                continue;
+            }
+            sum += (0..3).map(|k| (a[k] / pa - b[k] / pb).abs()).fold(0.0, f32::max);
+            lit += 1;
+        }
+        (lit >= before.len() / 4).then(|| sum / lit as f32)
+    }
+
+    /// A frame in which the whole wall changed colour at once.
+    const CUT: f32 = 0.5;
+    /// Below this the wall's colours are standing still.
+    const HELD: f32 = 0.02;
+
+    #[derive(Default, Debug)]
+    struct ColourReport {
+        /// Frames in which the wall cut to another colour.
+        cuts: usize,
+        /// Fraction of the groove's frames in which the colours stood still.
+        groove_held: f32,
+        /// Scene (or look) changes over the song.
+        changes: usize,
+        /// The largest single-frame colour travel outside a drop's flash.
+        worst: f32,
+    }
+
+    fn colour_report(stage: &Stage, directed: bool) -> ColourReport {
+        let mut report = ColourReport::default();
+        let mut last: Option<Vec<[f32; 3]>> = None;
+        let (mut groove_frames, mut groove_held) = (0usize, 0usize);
+        let mut last_look = None;
+        play_show(stage, &SONG, 60.0, directed, |f| {
+            let cells = stage.cell_colours(f.dmx);
+            let look = if directed { f.cue.scene.kind() as u32 } else { f.cue.look_index };
+            if last_look.is_some_and(|l| l != look) {
+                report.changes += 1;
+            }
+            last_look = Some(look);
+            // The drop is the one cut by design: the flash of white.
+            let flashing = f.cue.scene.flash > 0.25;
+            if let Some(travel) = last.as_ref().and_then(|l| colour_travel(l, &cells)) {
+                if !flashing {
+                    report.worst = report.worst.max(travel);
+                    if travel > CUT {
+                        report.cuts += 1;
+                    }
+                }
+                if SONG[f.passage].name.starts_with("groove") && f.into > 6.0 {
+                    groove_frames += 1;
+                    groove_held += (travel < HELD) as usize;
+                }
+            }
+            last = Some(cells);
+        });
+        report.groove_held = groove_held as f32 / groove_frames.max(1) as f32;
+        report
+    }
+
+    #[test]
+    fn a_scene_holds_its_palette_and_never_cuts_the_wall() {
+        let stage = festival_stage();
+        let before = colour_report(&stage, false);
+        let after = colour_report(&stage, true);
+        println!("without a director: {before:?}\nwith one:           {after:?}");
+
+        // Without a director the wall cuts to a new colour every couple of
+        // bars and on every polarity flip, and its colours never stand still.
+        assert!(before.cuts > 40, "the measure sees the old look rotation: {before:?}");
+        assert!(before.groove_held < 0.35, "{before:?}");
+
+        // With one, the only cut in the song is the drop's flash; a look
+        // lasts a phrase; and between changes the palette is held.
+        assert_eq!(after.cuts, 0, "{after:?}");
+        assert!(after.worst < 0.35, "{after:?}");
+        assert!(after.groove_held > 0.6, "{after:?}");
+        assert!(after.changes * 3 < before.changes, "{after:?} vs {before:?}");
+    }
+
+    #[test]
+    fn the_wheels_only_turn_while_the_beams_are_dark() {
+        let stage = festival_stage();
+        let mut last: Option<Vec<(u8, u8, u8)>> = None;
+        let (mut turns, mut lit_turns) = (0usize, Vec::new());
+        let mut white_frames = 0usize;
+        play_show(&stage, &SONG, 60.0, true, |f| {
+            let now: Vec<(u8, u8, u8)> = stage
+                .beams
+                .iter()
+                .map(|b| {
+                    (
+                        wire(f.dmx, b.channels.color_wheel),
+                        wire(f.dmx, b.channels.gobo_slot),
+                        wire(f.dmx, b.channels.dimmer),
+                    )
+                })
+                .collect();
+            white_frames += (f.cue.scene.beam.white && now[0].0 <= 4) as usize;
+            if let Some(prev) = &last {
+                for (i, (a, b)) in prev.iter().zip(&now).enumerate() {
+                    if a.0 != b.0 || a.1 != b.1 {
+                        turns += 1;
+                        // The wheel is sent on its way on a frame whose
+                        // dimmer is already closed, and the frame before it
+                        // was closed too. Under the drop's flash the wheels
+                        // turn in the light: the flash is the cover.
+                        if (a.2 > 0 || b.2 > 0) && f.cue.scene.flash == 0.0 {
+                            lit_turns.push((SONG[f.passage].name, f.into, i, *a, *b));
+                        }
+                    }
+                }
+            }
+            last = Some(now);
+        });
+        assert!(turns > 8, "the beams changed colour and gobo through the song: {turns}");
+        assert!(lit_turns.is_empty(), "a wheel turned while its beam was lit: {lit_turns:?}");
+        assert!(white_frames > 300, "open-white beams reached the wire: {white_frames}");
+    }
+
+    #[test]
+    fn a_new_look_sweeps_across_the_wall() {
+        use crate::emerge::SceneDirector;
+        const DT: f32 = 1.0 / 60.0;
+        const BPM: f32 = 122.0;
+        let stage = festival_stage();
+        let mut director = SceneDirector::new();
+        let render = |director: &mut SceneDirector, t: f32| {
+            let beat = (t * BPM / 60.0) as f64;
+            let mut cue = CueSnapshot { frame_time: t, major_smooth: 0.62, ..playing() };
+            cue.scene = director.tick(&cue, ArcState::Groove, beat, BPM, DT);
+            let dmx = render_dmx_frame(&cue, &stage.patch, &stage.profiles, None);
+            (cue.scene, stage.cell_colours(&dmx))
+        };
+        // Play up to just short of the first phrase boundary (beat 32)…
+        let boundary = 32.0 * 60.0 / BPM;
+        let mut t = 0.0;
+        let mut held = Vec::new();
+        while t < boundary - 0.5 {
+            held = render(&mut director, t).1;
+            t += DT;
+        }
+        // …then watch each cell leave the colour it was holding.
+        let mut left: Vec<Option<f32>> = vec![None; held.len()];
+        let mut swept = false;
+        while t < boundary + 4.0 {
+            let (scene, cells) = render(&mut director, t);
+            swept |= scene.in_transition();
+            for (i, (was, now)) in held.iter().zip(&cells).enumerate() {
+                let moved = colour_travel(std::slice::from_ref(was), std::slice::from_ref(now));
+                if left[i].is_none() && moved.is_some_and(|m| m > 0.25) {
+                    left[i] = Some(t);
+                }
+            }
+            t += DT;
+        }
+        assert!(swept, "the phrase boundary started a transition");
+        // (Not every cell changes colour: the phrase steps the palette round
+        // the triad, so what was the second colour is now the first.)
+        let times: Vec<f32> = left.iter().flatten().copied().collect();
+        assert!(times.len() >= left.len() / 2, "half the wall or more took a new colour: {left:?}");
+        // One end of the stage goes first and the change runs to the other.
+        let forwards = times.windows(2).all(|w| w[1] >= w[0]);
+        let backwards = times.windows(2).all(|w| w[1] <= w[0]);
+        assert!(forwards || backwards, "{times:?}");
+        let span = (times[times.len() - 1] - times[0]).abs();
+        assert!(span > 0.5, "it takes its time crossing: {span}s, {times:?}");
+    }
+
+    #[test]
+    fn white_beams_land_on_the_wheels_open_slot() {
+        let rig = patch(vec![beam("b", 1)]);
+        let profiles = with_profile(&["b"]);
+        let look = crate::emerge::scene(crate::emerge::SceneKind::Cathedral);
+        assert!(look.beam.white);
+        let cue = CueSnapshot { scene: crate::emerge::SceneFrame::holding(look), ..playing() };
+        let frame = render_dmx_frame(&cue, &rig, &profiles, None);
+        let profile = beam_profile();
+        let Some(ChannelDetail::ColorWheel { slots, .. }) =
+            profile_channel_at(&profile, &rig.fixtures[0], 1).and_then(|c| c.detail.as_ref())
+        else {
+            panic!("the 7R has a colour wheel");
+        };
+        let slot = slot_holding(slots, frame.data[0]).expect("a real slot");
+        assert_eq!(slot.name, "Open", "byte {}", frame.data[0]);
+        // A coloured look asks for a gel again.
+        let look = crate::emerge::scene(crate::emerge::SceneKind::Tide);
+        let cue = CueSnapshot { scene: crate::emerge::SceneFrame::holding(look), ..playing() };
+        let frame = render_dmx_frame(&cue, &rig, &profiles, None);
+        assert_ne!(slot_holding(slots, frame.data[0]).expect("a real slot").name, "Open");
+        // And with no profile to look the slot up in, open is byte 0.
+        let cue = CueSnapshot {
+            scene: crate::emerge::SceneFrame::holding(crate::emerge::scene(crate::emerge::SceneKind::Cathedral)),
+            ..playing()
+        };
+        assert_eq!(render_dmx_frame(&cue, &rig, &ProfileMap::new(), None).data[0], 0);
+    }
+
+    /// `cargo test scene_timeline -- --ignored --nocapture`
+    ///
+    /// Draws the song as the rig plays it: time runs left to right, and from
+    /// the top each band is the panel wall (one row per cell, across the
+    /// stage), the beam groups (their gel at their level), the GalaxyJets,
+    /// the laser, then a strip of ticks where the look changed and a strip
+    /// coloured by the arc. The upper band is the rig without a scene
+    /// director, the lower with one. Written to `target/scene-timeline/`.
+    #[test]
+    #[ignore = "writes timeline images; run by hand"]
+    fn scene_timeline() {
+        use image::{Rgb, RgbImage};
+        const CELL_H: u32 = 4;
+        const BEAM_H: u32 = 12;
+        const GAP: u32 = 5;
+        const BAND: u32 = (PANELS * CELLS) as u32 * CELL_H + GAP + BEAM_GROUPS as u32 * BEAM_H + GAP + 10 + 3 + 6 + GAP + 6 + 8;
+
+        #[derive(Clone)]
+        struct Column {
+            cells: Vec<[f32; 3]>,
+            beams: Vec<[f32; 3]>,
+            galaxy: [f32; 3],
+            laser: f32,
+            changed: bool,
+            arc: ArcState,
+            passage: usize,
+            into: f32,
+        }
+
+        let stage = festival_stage();
+        let record = |directed: bool| {
+            let mut columns = Vec::new();
+            let mut last_look = None;
+            let mut kinds: Vec<(f32, String)> = Vec::new();
+            let mut t = 0.0f32;
+            play_show(&stage, &SONG, 60.0, directed, |f| {
+                let look = if directed { f.cue.scene.kind() as u32 } else { f.cue.look_index };
+                let changed = last_look.is_some_and(|l| l != look);
+                if directed && (changed || last_look.is_none()) {
+                    kinds.push((t, format!("{} ({:?})", f.cue.scene.kind().name(), f.arc)));
+                }
+                last_look = Some(look);
+                let galaxy = wire(f.dmx, stage.galaxy.channels.dimmer) as f32 / 255.0;
+                columns.push(Column {
+                    cells: stage.cell_colours(f.dmx),
+                    beams: (0..BEAM_GROUPS)
+                        .map(|i| {
+                            let (dimmer, gel) = stage.beam_light(f.dmx, i);
+                            gel.map(|c| c * dimmer)
+                        })
+                        .collect(),
+                    galaxy: [galaxy * 0.8, galaxy * 0.7, galaxy],
+                    laser: (wire(f.dmx, stage.laser.channels.dimmer) > 0) as u8 as f32,
+                    changed,
+                    arc: f.arc,
+                    passage: f.passage,
+                    into: f.into,
+                });
+                t += SongPlayer::DT;
+            });
+            (columns, kinds)
+        };
+        let (before, _) = record(false);
+        let (after, kinds) = record(true);
+        println!("\nscenes, as played:");
+        for (t, kind) in &kinds {
+            println!("  {:>6.1}s  {kind}", t);
+        }
+
+        let arc_colour = |arc: ArcState| match arc {
+            ArcState::Silence => [0.15, 0.15, 0.15],
+            ArcState::Intro => [0.1, 0.5, 0.5],
+            ArcState::Groove => [0.1, 0.6, 0.2],
+            ArcState::Buildup => [0.8, 0.7, 0.1],
+            ArcState::PreDropTension => [0.9, 0.45, 0.1],
+            ArcState::Drop => [0.9, 0.1, 0.1],
+            ArcState::SustainPeak => [0.8, 0.1, 0.7],
+            ArcState::Cooldown => [0.15, 0.3, 0.8],
+            ArcState::Breakdown => [0.4, 0.2, 0.7],
+        };
+        let px = |c: [f32; 3]| Rgb(c.map(|v| (v.clamp(0.0, 1.0).powf(1.0 / 1.6) * 255.0) as u8));
+        // Draw `columns[from..to]`, `bin` frames to a pixel column, `zoom` pixels wide.
+        let draw = |name: &str, from: usize, to: usize, bin: usize, zoom: u32| {
+            let width = ((to - from) / bin) as u32 * zoom;
+            let mut img = RgbImage::from_pixel(width, BAND * 2 + 6, Rgb([10, 10, 12]));
+            for (band, columns) in [&before, &after].into_iter().enumerate() {
+                let top = band as u32 * (BAND + 6);
+                for col in 0..(to - from) / bin {
+                    let frames = &columns[from + col * bin..from + (col + 1) * bin];
+                    let mean = |of: &dyn Fn(&Column) -> [f32; 3]| {
+                        let mut sum = [0.0f32; 3];
+                        for f in frames {
+                            let c = of(f);
+                            for k in 0..3 {
+                                sum[k] += c[k] / frames.len() as f32;
+                            }
+                        }
+                        sum
+                    };
+                    for x in col as u32 * zoom..(col as u32 + 1) * zoom {
+                        let mut y = top;
+                        for cell in 0..PANELS * CELLS {
+                            let c = px(mean(&|f| f.cells[cell]));
+                            for dy in 0..CELL_H {
+                                img.put_pixel(x, y + dy, c);
+                            }
+                            y += CELL_H;
+                        }
+                        y += GAP;
+                        for beam in 0..BEAM_GROUPS {
+                            let c = px(mean(&|f| f.beams[beam]));
+                            for dy in 0..BEAM_H - 2 {
+                                img.put_pixel(x, y + dy, c);
+                            }
+                            y += BEAM_H;
+                        }
+                        y += GAP;
+                        let c = px(mean(&|f| f.galaxy));
+                        for dy in 0..10 {
+                            img.put_pixel(x, y + dy, c);
+                        }
+                        y += 10 + 3;
+                        let c = px(mean(&|f| [0.0, f.laser, 0.2 * f.laser]));
+                        for dy in 0..6 {
+                            img.put_pixel(x, y + dy, c);
+                        }
+                        y += 6 + GAP;
+                        if frames.iter().any(|f| f.changed) {
+                            for dy in 0..6 {
+                                img.put_pixel(x, y + dy, Rgb([255, 255, 255]));
+                            }
+                        }
+                        y += 6;
+                        let c = px(arc_colour(frames[frames.len() / 2].arc));
+                        for dy in 0..8 {
+                            img.put_pixel(x, y + dy, c);
+                        }
+                    }
+                }
+            }
+            let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/target/scene-timeline");
+            std::fs::create_dir_all(dir).expect("timeline dir");
+            let path = format!("{dir}/{name}.png");
+            img.save(&path).expect("write timeline");
+            println!("wrote {path} ({}x{})", img.width(), img.height());
+        };
+
+        // The whole song, a quarter of a second to the pixel.
+        draw("song", 0, before.len() / 8 * 8, 8, 1);
+        // Close-ups, a frame to two pixels: `secs` from `into` seconds into a passage.
+        let window = |passage: &str, into: f32, secs: f32| {
+            let start = after
+                .iter()
+                .position(|c| SONG[c.passage].name.starts_with(passage) && c.into >= into)
+                .expect("passage");
+            (start, (start + (secs * SongPlayer::FPS) as usize).min(after.len()))
+        };
+        for (name, passage, into, secs) in [
+            ("groove", "groove", 8.0, 22.0),
+            ("into-breakdown", "groove", 56.0, 22.0),
+            ("build-and-drop", "build", 4.0, 22.0),
+            ("peak", "drop", 14.0, 22.0),
+        ] {
+            let (from, to) = window(passage, into, secs);
+            draw(name, from, to, 1, 2);
         }
     }
 }

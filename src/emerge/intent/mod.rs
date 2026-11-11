@@ -10,6 +10,7 @@ mod intent;
 mod lfo;
 mod movement;
 mod oscillator;
+mod scene;
 
 pub use fixture_brain::{
     ArcSignals, ArcState, CueLaneIntent, CuePriority, FixtureBrain, FixtureBrainContext,
@@ -17,8 +18,8 @@ pub use fixture_brain::{
     PhaseState, ShowClockSnapshot, ShowClockSource, TopologyState,
 };
 pub use intent::{
-    render_fixture_intent, render_fixture_intent_aimed, renders_as_galaxy_effect, segment_rgbw,
-    FixtureIntentState,
+    render_fixture_intent, render_fixture_intent_aimed, render_fixture_intent_placed,
+    renders_as_galaxy_effect, scene_cell_rgbw, segment_rgbw, FixtureIntentState,
 };
 pub use lfo::{add_clamped, LfoBankConfig, LfoModulation, LfoTarget, LfoWaveform};
 pub use movement::{
@@ -29,4 +30,8 @@ pub use movement::{
 pub use oscillator::{
     add_bipolar, bipolar_wave, OscillatorBinding, OscillatorFrameSnapshot, OscillatorInterval,
     OscillatorShape,
+};
+pub use scene::{
+    scene, scene_for, BeamLook, Look, Part, Scene, SceneDirector, SceneFrame, SceneKind, Section,
+    Shade, StageLayout, StagePlace, Transition,
 };

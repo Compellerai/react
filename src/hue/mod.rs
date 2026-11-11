@@ -453,6 +453,11 @@ pub struct CueSnapshot {
     /// is the legacy sweep with no steering, so any path without a director
     /// (Hue/WLED/OSC snapshots, tests) moves exactly as before.
     pub movement: crate::emerge::MovementFrame,
+    /// The look the whole rig is holding and the crossfade into the next one,
+    /// stamped by the DMX manager's `SceneDirector`. The default is
+    /// undirected: colour and levels are computed exactly as they were before
+    /// scenes, so any path without a director is unchanged.
+    pub scene: crate::emerge::SceneFrame,
 
     // === COLLATZ STATE (from Mythos engine, available to all lighting outputs) ===
     /// Collatz heat (0-1): accumulated instability
@@ -607,6 +612,7 @@ impl CueSnapshot {
             tonnetz_x: 0.0,
             tonnetz_y: 0.0,
             movement: crate::emerge::MovementFrame::default(),
+            scene: crate::emerge::SceneFrame::default(),
             // Collatz fields default to 0; populated by OSC thread from LightingMetrics
             collatz_heat: 0.0,
             collatz_phase: 0.0,
@@ -700,6 +706,7 @@ impl Default for CueSnapshot {
             tonnetz_x: 0.0,
             tonnetz_y: 0.0,
             movement: crate::emerge::MovementFrame::default(),
+            scene: crate::emerge::SceneFrame::default(),
             collatz_heat: 0.0,
             collatz_phase: 0.0,
             collatz_intensity: 0.0,

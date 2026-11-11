@@ -300,6 +300,14 @@ impl OscillatorFrameSnapshot {
         }
     }
 
+    /// Beats since the clock origin, unwrapped — for things that count whole
+    /// steps of the beat (a twinkle that re-rolls twice a beat) rather than
+    /// reading a phase. With no absolute beat source this is the position
+    /// within the current beat.
+    pub fn beats(&self) -> f64 {
+        if self.beats_abs > 0.0 { self.beats_abs } else { self.beat_phase as f64 }
+    }
+
     /// Integer phrase ordinal for phrase-quantized discrete choices (gobo slot,
     /// laser macro). Clock-locked on the `from_clock` path, 122-BPM fallback on
     /// `from_cue`.
