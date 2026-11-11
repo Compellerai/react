@@ -23,3 +23,8 @@ This repository is public. Signing identity, notarization credentials, the
 license verification key and the development API host live only in the
 untracked `.env.local` (template: `.env.example`), loaded by `scripts/env.sh`.
 Do not add them, internal hostnames, or the NDI SDK to any tracked file.
+
+Release packaging is private too. `build.sh` stops at an ad-hoc signed `.app`;
+official releases are signed, notarized and turned into an installer by an
+untracked `release.sh`. Do not add Developer ID signing, notarization or
+installer steps to `build.sh` or any other tracked file.

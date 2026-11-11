@@ -699,7 +699,7 @@ react/
 ├── tools/                   # Standalone hardware bench tools
 ├── stream-smoke/            # Stream overlay smoke-test server
 ├── Cargo.toml / build.rs    # Crate manifest and build script
-├── build.sh                 # Release build: bundle, sign, notarize, DMG
+├── build.sh                 # Build a self-contained .app bundle
 └── start-react.sh           # Build and run from source
 ```
 
@@ -959,21 +959,22 @@ raw_energy    - Pre-normalization energy for silence detection
 ./start-react.sh
 ```
 
-### macOS release build
+### macOS app bundle
 
 ```bash
-# Ad-hoc signed .app, no private settings required
-./build.sh --dev --no-license-key
-
-# Signed, notarized .app + DMG (needs .env.local)
-./build.sh
+# Self-contained .app, no private settings required
+./build.sh --no-license-key
 ```
+
+The bundle is ad-hoc signed, which is enough to run it on the Mac that built
+it. Official releases are signed with a Developer ID and notarized by
+Compeller; that tooling and its credentials are not part of this repository.
 
 ### Private settings
 
-Signing identity, notarization credentials, the license verification key and
-the development API host are never stored in this repository. They are read
-from an untracked `.env.local` — copy `.env.example` and fill it in.
+The license verification key and the development API host are never stored in
+this repository. They are read from an untracked `.env.local` — copy
+`.env.example` and fill it in.
 
 ## Keyboard Shortcuts
 

@@ -1,16 +1,16 @@
 #!/bin/bash
-# build.sh - Build, sign, notarize, and create DMG for REACT by Compeller.ai
+# build.sh - Build REACT by Compeller.ai into a self-contained macOS .app
 #
 # Usage:
-#   ./build.sh              # Full build with signing and notarization
-#   ./build.sh --dev        # Build with ad-hoc signing (no notarization)
+#   ./build.sh                     # Build the .app bundle
+#   ./build.sh --no-license-key    # Community build, no private settings
 #
-#   ./build.sh --dev --no-license-key   # Community build, no private settings
+# The bundle is ad-hoc signed, which is enough to run it on the Mac that built
+# it. Distributing it to other Macs needs a Developer ID signature and Apple
+# notarization; neither is part of this repository.
 #
-# A full build needs .env.local (untracked; see .env.example) with:
-#   APPLE_ID, APPLE_TEAM_ID, APPLE_PASSWORD   notarization credentials
-#   APPLE_SIGNING_IDENTITY                    "Developer ID Application: ..." identity
-#   REACT_LICENSE_HMAC_KEY                    license verification key
+# Private settings come from .env.local (untracked; see .env.example):
+#   REACT_LICENSE_HMAC_KEY         license verification key
 
 set -e
 
@@ -25,12 +25,11 @@ echo "=== REACT by Compeller.ai - Build ==="
 echo ""
 
 # Parse arguments
-DEV_MODE=false
 ALLOW_NO_LICENSE_KEY=false
 for arg in "$@"; do
     case $arg in
         --dev)
-            DEV_MODE=true
+            # Accepted for old scripts: every build here is the ad-hoc signed one.
             ;;
         --no-license-key)
             ALLOW_NO_LICENSE_KEY=true
@@ -39,29 +38,12 @@ for arg in "$@"; do
             echo "Usage: ./build.sh [OPTIONS]"
             echo ""
             echo "Options:"
-            echo "  --dev             Build with ad-hoc signing (skip notarization)"
             echo "  --no-license-key  Build without REACT_LICENSE_HMAC_KEY"
             echo "  --help            Show this help message"
             exit 0
             ;;
     esac
 done
-
-# Signing identity and notarization credentials come from .env.local (loaded by
-# scripts/env.sh) — they are never stored in this repository.
-if [ "$DEV_MODE" = false ]; then
-    if [ -z "$APPLE_ID" ] || [ -z "$APPLE_TEAM_ID" ] || [ -z "$APPLE_PASSWORD" ] || [ -z "$APPLE_SIGNING_IDENTITY" ]; then
-        echo "ERROR: Apple signing/notarization env vars not set."
-        echo "Create $SCRIPT_DIR/.env.local (see .env.example) with:"
-        echo '  export APPLE_ID="you@example.com"'
-        echo '  export APPLE_TEAM_ID="YOURTEAMID"'
-        echo '  export APPLE_PASSWORD="xxxx-xxxx-xxxx-xxxx"'
-        echo '  export APPLE_SIGNING_IDENTITY="Developer ID Application: Your Company (YOURTEAMID)"'
-        echo ""
-        echo "Or run with --dev for ad-hoc signing (no notarization)"
-        exit 1
-    fi
-fi
 
 # A distributable build without the license key cannot verify signed plan
 # entitlements — refuse unless that is explicitly intended.
@@ -85,10 +67,11 @@ YOLO_URL="https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n
 mkdir -p "$MODELS_DIR"
 if [ ! -f "$YOLO_MODEL" ]; then
     echo "       Downloading YOLOv8n ONNX model..."
-    curl -L -o "$YOLO_MODEL" "$YOLO_URL"
-    if [ -f "$YOLO_MODEL" ]; then
+    # -f: an HTTP error page must never be saved as if it were the model.
+    if curl -fL -o "$YOLO_MODEL" "$YOLO_URL"; then
         echo "       Downloaded yolov8n.onnx ($(du -h "$YOLO_MODEL" | cut -f1))"
     else
+        rm -f "$YOLO_MODEL"
         echo "       WARNING: Failed to download YOLOv8n model"
     fi
 else
@@ -97,12 +80,9 @@ fi
 
 if [ -d "$NDI_SDK_DIR" ]; then
     echo "       NDI SDK: $NDI_SDK_DIR"
-elif [ "$DEV_MODE" = true ]; then
-    echo "       WARNING: NDI SDK not found at $NDI_SDK_DIR — building without NDI output"
 else
-    echo "ERROR: NDI SDK not found at $NDI_SDK_DIR"
-    echo "Install the NDI SDK there, or set NDI_SDK_DIR (see .env.example)"
-    exit 1
+    echo "       WARNING: NDI SDK not found at $NDI_SDK_DIR — building without NDI output"
+    echo "       Install the NDI SDK there, or set NDI_SDK_DIR (see .env.example)"
 fi
 
 # Step 2: Clean previous builds
@@ -452,142 +432,25 @@ else
     echo "       Install with: brew install gstreamer"
 fi
 
-# Step 5: Sign, notarize, and create DMG
-echo "[5/5] Signing and packaging..."
+# Step 5: Ad-hoc sign
+echo "[5/5] Signing (ad-hoc)..."
 
-IDENTITY="$APPLE_SIGNING_IDENTITY"
 ENTITLEMENTS="$SCRIPT_DIR/entitlements.plist"
 
 # Clear extended attributes
 xattr -cr "$APP_BUNDLE"
 
-if [ "$DEV_MODE" = true ]; then
-    # Ad-hoc signing for development
-    echo "       Signing with ad-hoc signature (dev mode)..."
-
-    # Sign all dylibs (Frameworks + GStreamer plugins in Resources)
-    find "$FRAMEWORKS_DIR" "$RESOURCES_DIR/gstreamer-1.0" -name "*.dylib" -type f 2>/dev/null | while read -r fw; do
-        codesign --force --sign - --entitlements "$ENTITLEMENTS" "$fw"
-    done
-
-    # Sign app bundle
-    codesign --force --deep --sign - --entitlements "$ENTITLEMENTS" "$APP_BUNDLE"
-
-    echo ""
-    echo "=== Build Complete (Dev Mode) ==="
-    echo "App bundle: $APP_BUNDLE"
-    echo ""
-    echo "To run:"
-    echo "  open \"$APP_BUNDLE\""
-    exit 0
-fi
-
-# Production signing with Developer ID
-echo "       Signing all Mach-O binaries with Developer ID..."
-
-# Sign any Mach-O binaries inside the app bundle
-while IFS= read -r -d '' f; do
-    if file "$f" | grep -q "Mach-O"; then
-        echo "         codesign: $(basename "$f")"
-        codesign --force --sign "$IDENTITY" --options runtime --timestamp "$f"
-    fi
-done < <(find "$APP_BUNDLE/Contents" -type f -print0)
-
-# Sign the entire app bundle with hardened runtime + entitlements
-echo "       Signing app bundle with hardened runtime..."
-codesign --force --sign "$IDENTITY" \
-    --entitlements "$ENTITLEMENTS" \
-    --options runtime \
-    --timestamp \
-    "$APP_BUNDLE"
-
-echo "       Verifying codesign..."
-codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
-
-# Notarize the app
-ZIP_PATH="$SCRIPT_DIR/target/release/bundle/REACT-by-Compeller-ai.zip"
-echo "       Creating notarization zip..."
-rm -f "$ZIP_PATH" 2>/dev/null || true
-ditto -c -k --keepParent "$APP_BUNDLE" "$ZIP_PATH"
-
-echo "       Submitting to Apple notarization (this can take a while)..."
-xcrun notarytool submit "$ZIP_PATH" \
-    --apple-id "$APPLE_ID" \
-    --team-id "$APPLE_TEAM_ID" \
-    --password "$APPLE_PASSWORD" \
-    --wait
-
-echo "       Stapling notarization ticket..."
-xcrun stapler staple "$APP_BUNDLE"
-
-# Clean up zip
-rm -f "$ZIP_PATH"
-
-# Create DMG
-DMG_DIR="$SCRIPT_DIR/target/release/bundle/dmg"
-mkdir -p "$DMG_DIR"
-DMG_PATH="$DMG_DIR/REACT-by-Compeller-ai.dmg"
-
-VOLBASE="REACT Installer"
-STAMP=$(date +%Y%m%d-%H%M%S)
-
-cleanup_mounts() {
-    for v in "/Volumes/REACT" "/Volumes/REACT Installer"; do
-        if [ -d "$v" ]; then
-            echo "       Detaching stale mount: $v"
-            hdiutil detach "$v" >/dev/null 2>&1 || hdiutil detach -force "$v" >/dev/null 2>&1 || true
-        fi
-    done
-    ls -1d /Volumes/"$VOLBASE"* 2>/dev/null | while IFS= read -r v; do
-        [ -d "$v" ] || continue
-        echo "       Detaching stale mount: $v"
-        hdiutil detach "$v" >/dev/null 2>&1 || hdiutil detach -force "$v" >/dev/null 2>&1 || true
-    done
-}
-
-# Stage the app into /tmp
-STAGE_DIR=$(mktemp -d /tmp/react_dmg_stage.XXXXXX)
-trap 'rm -rf "$STAGE_DIR"' EXIT
-
-echo "       Staging app for DMG..."
-ditto "$APP_BUNDLE" "$STAGE_DIR/$(basename "$APP_BUNDLE")"
-
-cleanup_mounts
-
-echo "       Creating DMG: $DMG_PATH"
-rm -f "$DMG_PATH" 2>/dev/null || true
-
-CREATED=0
-for attempt in 1 2 3; do
-    VOLNAME="$VOLBASE $STAMP-$attempt"
-    echo "       DMG attempt $attempt (volname: $VOLNAME)"
-    if hdiutil create -volname "$VOLNAME" -srcfolder "$STAGE_DIR" -ov -format UDZO "$DMG_PATH"; then
-        CREATED=1
-        break
-    fi
-    echo "       hdiutil failed; cleaning mounts and retrying..."
-    cleanup_mounts
-    rm -f "$DMG_PATH" 2>/dev/null || true
-    sleep 1
-    STAMP=$(date +%Y%m%d-%H%M%S)
+# Sign all dylibs (Frameworks + GStreamer plugins in Resources)
+find "$FRAMEWORKS_DIR" "$RESOURCES_DIR/gstreamer-1.0" -name "*.dylib" -type f 2>/dev/null | while read -r fw; do
+    codesign --force --sign - --entitlements "$ENTITLEMENTS" "$fw"
 done
 
-if [ "$CREATED" -ne 1 ]; then
-    echo "ERROR: DMG creation failed."
-    echo "If you saw 'Operation not permitted':"
-    echo "  1) Close any Finder windows showing /Volumes/REACT*"
-    echo "  2) System Settings > Privacy & Security > Full Disk Access > enable Terminal"
-    echo "  3) Re-run the script"
-    exit 1
-fi
-
-echo "       Verifying Gatekeeper acceptance..."
-spctl -a -vv "$APP_BUNDLE" || true
+# Sign app bundle
+codesign --force --deep --sign - --entitlements "$ENTITLEMENTS" "$APP_BUNDLE"
 
 echo ""
 echo "=== Build Complete ==="
 echo "App bundle: $APP_BUNDLE"
-echo "DMG: $DMG_PATH"
 echo ""
-echo "To test install:"
-echo "  open \"$DMG_PATH\""
+echo "To run:"
+echo "  open \"$APP_BUNDLE\""

@@ -3,6 +3,10 @@
 .env.local
 .env.*.local
 
+# Private release tooling (signing, notarization, installer) — not part of
+# this repository
+/release.sh
+
 # Build artifacts
 /target/
 /tools/*/target/
