@@ -47,27 +47,10 @@ done
 # Set deployment target
 export MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET:-12.0}
 
-# Step 1: Setup NDI SDK and download models
-echo "[1/5] Setting up NDI SDK and models..."
-
-# Download YOLOv8n ONNX model if not present
-MODELS_DIR="$SCRIPT_DIR/models"
-YOLO_MODEL="$MODELS_DIR/yolov8n.onnx"
-YOLO_URL="https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.onnx"
-
-mkdir -p "$MODELS_DIR"
-if [ ! -f "$YOLO_MODEL" ]; then
-    echo "       Downloading YOLOv8n ONNX model..."
-    # -f: an HTTP error page must never be saved as if it were the model.
-    if curl -fL -o "$YOLO_MODEL" "$YOLO_URL"; then
-        echo "       Downloaded yolov8n.onnx ($(du -h "$YOLO_MODEL" | cut -f1))"
-    else
-        rm -f "$YOLO_MODEL"
-        echo "       WARNING: Failed to download YOLOv8n model"
-    fi
-else
-    echo "       YOLOv8n model already present"
-fi
+# Step 1: Setup NDI SDK
+# (The camera detection model is not downloaded here: export it once with
+#  scripts/export-detector.py, see models/README.md. It is copied into the app bundle in step 4.)
+echo "[1/5] Setting up NDI SDK..."
 
 if [ -d "$NDI_SDK_DIR" ]; then
     echo "       NDI SDK: $NDI_SDK_DIR"
@@ -134,7 +117,7 @@ else
     echo "       WARNING: Presets directory not found at $SCRIPT_DIR/presets"
 fi
 
-# Copy ONNX models for camera tracking
+# Copy the ONNX detection model for camera tracking (labels are stored inside it)
 echo "       Copying models..."
 if [ -d "$SCRIPT_DIR/models" ]; then
     mkdir -p "$RESOURCES_DIR/models"
@@ -144,7 +127,7 @@ if [ -d "$SCRIPT_DIR/models" ]; then
     if [ "$MODEL_COUNT" -gt 0 ]; then
         echo "       Copied $MODEL_COUNT ONNX models to Resources"
     else
-        echo "       WARNING: No .onnx models found in $SCRIPT_DIR/models"
+        echo "       WARNING: No .onnx models found in $SCRIPT_DIR/models (camera tracking will be disabled; see models/README.md)"
     fi
 fi
 

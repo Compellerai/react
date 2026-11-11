@@ -41,7 +41,7 @@ REACT is a professional-grade visualization platform designed for musicians, DJs
 - **Hero's Journey System**: 4-act temporal narrative (Birth, Lock, Dive, Afterglow) that emerges from audio
 - **Genre-Aware Lighting**: 45+ music genre profiles with tuned thresholds, palettes, and behaviors
 - **3-Layer Cue Engine**: Palette → Zone → Accents state machine with envelope-driven effects
-- **Camera Tracking System**: Multi-camera face detection with tracking mix modes
+- **Camera Tracking System**: Multi-camera person detection with tracking mix modes
 - **Crash-Resilient Recording**: Segmented recording with journal-based recovery
 - **Dual RTMP Streaming**: Simultaneous multi-destination streaming
 - **Three-Stage Gain Model**: Calibration + Level Assist + user gain with safety limiter
@@ -535,7 +535,7 @@ Shared types for cross-backend device management:
 
 ### Camera System
 
-- **Multi-Camera Face Detection**: Multiple camera input with real-time face detection
+- **Multi-Camera Person Detection**: Multiple camera input with real-time person detection (model: see `models/README.md`)
 - **Tracking Mix Modes**: Configurable blending between camera sources
 - **Per-Camera Influence/Confidence**: Weighted contribution from each camera
 - **Shared Texture Management**: Efficient GPU texture sharing across cameras
@@ -690,7 +690,7 @@ react/
 │
 ├── presets/                 # MilkDrop visualization presets
 ├── assets/                  # Texture atlases, fixture profiles
-├── models/                  # Vision model export scripts (weights are not tracked)
+├── models/                  # Camera detection model (weights are not tracked, see models/README.md)
 ├── public/                  # Static assets (fonts, images, 3D models)
 ├── libs/                    # projectM 4.x dylibs
 ├── deps/projectm-sys/       # Patched projectm-sys crate
@@ -971,6 +971,9 @@ The bundle is ad-hoc signed, which is enough to run it on the Mac that built
 it. Official releases are signed with a Developer ID and notarized by
 Compeller; that tooling and its credentials are not part of this repository.
 
+Camera tracking needs the detection model in `models/` before you build; it is
+exported once with `scripts/export-detector.py` (see `models/README.md`).
+
 ### Private settings
 
 The development API host is never stored in this repository. It is read from
@@ -1090,6 +1093,7 @@ Key tables:
 - Grant camera permissions in System Preferences
 - Check camera is not exclusively claimed by another application
 - Lower quality tier if detection is too slow
+- No detections at all: check that the detection model was exported (see `models/README.md`)
 
 ### Recording Recovery
 - If app crashes during segmented recording, segments are preserved

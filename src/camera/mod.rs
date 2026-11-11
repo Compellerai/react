@@ -1,6 +1,6 @@
 //! Multi-Camera Tracking System
 //!
-//! Provides person/face detection and tracking across multiple USB cameras,
+//! Provides person detection and tracking across multiple USB cameras,
 //! with bounded resource usage suitable for real-time audio-reactive visualization.
 //!
 //! ## Architecture

@@ -38,18 +38,24 @@ if [ ! -f "$NDI_SDK_DIR/lib/libndi.dylib" ] && [ ! -f "$NDI_SDK_DIR/lib/macOS/li
     echo "NOTE: NDI SDK not found at $NDI_SDK_DIR — NDI output will be disabled"
 fi
 
-# Check for YOLO model
+# Check for the camera detection model (models/rfdetr-nano.onnx, or another
+# rfdetr-*.onnx / dfine-*.onnx export)
 MODELS_DIR="$SCRIPT_DIR/models"
-YOLO_MODEL="$MODELS_DIR/yolov8m-world.onnx"
+VISION_MODEL="$MODELS_DIR/rfdetr-nano.onnx"
+if [ ! -f "$VISION_MODEL" ]; then
+    for candidate in "$MODELS_DIR"/rfdetr-*.onnx "$MODELS_DIR"/dfine-*.onnx; do
+        if [ -f "$candidate" ]; then VISION_MODEL="$candidate"; break; fi
+    done
+fi
 
-if [ -f "$YOLO_MODEL" ]; then
-    SIZE=$(du -h "$YOLO_MODEL" | cut -f1)
-    echo "Vision model ready: yolov8m-world.onnx ($SIZE)"
+if [ -f "$VISION_MODEL" ]; then
+    SIZE=$(du -h "$VISION_MODEL" | cut -f1)
+    echo "Vision model ready: $(basename "$VISION_MODEL") ($SIZE)"
 else
-    echo "WARNING: Vision model not found at $YOLO_MODEL"
+    echo "WARNING: Vision model not found in $MODELS_DIR"
     echo "         Camera tracking will be disabled"
     echo ""
-    echo "To enable vision tracking, see: models/EXPORT_MODEL.md"
+    echo "To enable vision tracking, see: models/README.md"
 fi
 
 # Features:

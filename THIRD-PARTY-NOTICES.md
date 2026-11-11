@@ -39,5 +39,14 @@ Most are MIT and/or Apache-2.0. The ones that are not purely permissive:
 | GStreamer and its plugins | Streaming pipelines, multi-channel capture | LGPL 2.1+ for the core; individual plugins vary |
 | NDI SDK (optional) | NDI output | Proprietary. NDI® is a registered trademark of Vizrt NDI AB |
 
+## Model weights, not included
+
+The camera detection model is exported locally (see `models/README.md`) and is
+bundled into built apps, not into this repository.
+
+| Model | Used for | License |
+|-------|----------|---------|
+| [RF-DETR](https://github.com/roboflow/rf-detr) Nano, COCO checkpoint, Copyright 2025 Roboflow | Camera person detection | Apache License 2.0. Trained on [COCO 2017](https://cocodataset.org/) (annotations CC BY 4.0) |
+
 If you distribute a built copy of REACT, you are responsible for complying with
 the licenses of every library you bundle with it.

@@ -50,46 +50,10 @@ impl BBox {
     }
 }
 
-/// Load class names from a JSON file alongside the model
-/// Returns empty Vec if file doesn't exist (will use generic "class_N" names)
-pub fn load_classes_from_json(model_path: &std::path::Path) -> Vec<String> {
-    // Look for classes.json in same directory as model
-    let classes_path = match model_path.parent() {
-        Some(p) => p.join("classes.json"),
-        None => return Vec::new(),
-    };
-
-    if !classes_path.exists() {
-        log::warn!("[Classes] No classes.json found at {:?}", classes_path);
-        log::warn!("[Classes] Export your model with classes.json for proper labels");
-        return Vec::new();
-    }
-
-    match std::fs::read_to_string(&classes_path) {
-        Ok(contents) => {
-            match serde_json::from_str::<Vec<String>>(&contents) {
-                Ok(classes) => {
-                    log::info!("[Classes] Loaded {} classes from {:?}: {:?}",
-                        classes.len(), classes_path, &classes[..classes.len().min(5)]);
-                    classes
-                }
-                Err(e) => {
-                    log::error!("[Classes] Failed to parse classes.json: {}", e);
-                    Vec::new()
-                }
-            }
-        }
-        Err(e) => {
-            log::error!("[Classes] Failed to read classes.json: {}", e);
-            Vec::new()
-        }
-    }
-}
-
 /// Raw detection from the detector
 #[derive(Clone, Debug)]
 pub struct Detection {
-    pub class_id: usize,         // COCO class ID (0-79)
+    pub class_id: usize,         // Index into the model's label list
     pub class_name: String,      // Human-readable class name
     pub bbox: BBox,
     pub score: f32,
@@ -113,7 +77,7 @@ impl Detection {
 #[derive(Clone, Debug)]
 pub struct Track {
     pub id: u32,
-    pub class_id: usize,             // COCO class ID
+    pub class_id: usize,             // Index into the model's label list
     pub class_name: String,          // Human-readable class name
     pub bbox: BBox,
     pub bbox_smooth: BBox,           // EMA-smoothed for stable output
@@ -300,7 +264,7 @@ pub struct TrackingOutput {
     pub confidence: f32,         // Track confidence
     pub num_tracks: u32,         // Total tracks across cameras
     pub num_cameras: u32,        // Active cameras
-    pub class_name: Option<String>,  // What was detected (e.g., "person", "cup")
+    pub class_name: Option<String>,  // What was detected (e.g., "person")
     pub bbox: Option<BBox>,      // Bounding box of active track
 }
 
@@ -417,63 +381,137 @@ impl TrackingConfig {
         }
     }
 
-    /// Find the ONNX model, checking Resources for bundled apps
-    /// Prefers LVIS model (1203 classes), falls back to world model (custom classes)
+    /// Find the detection model.
+    ///
+    /// Looks in `models/` relative to the working directory, the source tree
+    /// this binary was built from, the app bundle's `Resources`, and the
+    /// repository root of a development build. See [`find_model_in_dir`] for
+    /// which file is picked inside a directory.
     pub fn find_model_path() -> Option<std::path::PathBuf> {
         use std::path::PathBuf;
 
-        // Model names in preference order (LVIS first for more classes)
-        let model_names = [
-            "yolov8m-worldv2-lvis.onnx",  // 1203 LVIS classes
-            "yolov8m-world-lvis.onnx",     // Alternative LVIS naming
-            "yolov8m-world.onnx",          // Original custom classes
+        let mut dirs: Vec<(&str, PathBuf)> = vec![
+            ("working directory", PathBuf::from("models")),
+            ("source tree", PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models")),
         ];
 
-        for model_name in &model_names {
-            // Check configured path first (relative to cwd)
-            let default_path = PathBuf::from(format!("models/{}", model_name));
-            if default_path.exists() {
-                log::info!("[Model] Found at: {:?}", default_path);
-                return Some(default_path);
-            }
-
-            // Check compile-time path (for development builds)
-            let compile_time_path = PathBuf::from(format!(
-                "{}/models/{}", env!("CARGO_MANIFEST_DIR"), model_name
-            ));
-            if compile_time_path.exists() {
-                log::info!("[Model] Found at compile-time path: {:?}", compile_time_path);
-                return Some(compile_time_path);
-            }
-
-            if let Ok(exe) = std::env::current_exe() {
-                // Check in Resources for bundled macOS app
-                if let Some(macos_dir) = exe.parent() {
-                    let resources = macos_dir.parent().map(|p| p.join("Resources"));
-                    if let Some(ref res) = resources {
-                        let bundled = res.join(format!("models/{}", model_name));
-                        if bundled.exists() {
-                            log::info!("[Model] Found in bundle: {:?}", bundled);
-                            return Some(bundled);
-                        }
-                    }
-                }
-
-                // Check for development builds
-                if let Some(parent) = exe.parent() {
-                    if let Some(target_dir) = parent.parent() {
-                        if let Some(repo_root) = target_dir.parent() {
-                            let dev_model = repo_root.join(format!("models/{}", model_name));
-                            if dev_model.exists() {
-                                log::info!("[Model] Found at dev path: {:?}", dev_model);
-                                return Some(dev_model);
-                            }
-                        }
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(exe_dir) = exe.parent() {
+                // Bundled macOS app: Contents/MacOS/<exe> -> Contents/Resources/models
+                if let Some(contents) = exe_dir.parent() {
+                    dirs.push(("app bundle", contents.join("Resources").join("models")));
+                    // Development build: target/<profile>/<exe> -> <repo>/models
+                    if let Some(repo_root) = contents.parent() {
+                        dirs.push(("repository", repo_root.join("models")));
                     }
                 }
             }
         }
 
+        for (label, dir) in &dirs {
+            if let Some(path) = find_model_in_dir(dir) {
+                log::info!("[Model] Found in {}: {:?}", label, path);
+                return Some(path);
+            }
+        }
+
         None
+    }
+}
+/// Detection model looked for first in a models directory.
+/// Release tooling reads this line as text: keep it on one line, in this form.
+pub const DEFAULT_MODEL_FILE: &str = "rfdetr-nano.onnx";
+
+/// File name prefixes of the exports the detector reads, most preferred first
+const MODEL_FILE_PREFIXES: [&str; 2] = ["rfdetr-", "dfine-"];
+
+/// Pick the detection model inside one directory: [`DEFAULT_MODEL_FILE`] when
+/// it exists, otherwise the alphabetically first `rfdetr-*.onnx`, otherwise
+/// the alphabetically first `dfine-*.onnx`.
+///
+/// Any export of those two families works because the label list travels in
+/// the model file, so a differently trained export only has to follow the
+/// naming pattern.
+pub fn find_model_in_dir(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let default = dir.join(DEFAULT_MODEL_FILE);
+    if default.is_file() {
+        return Some(default);
+    }
+
+    let mut names: Vec<String> = std::fs::read_dir(dir).ok()?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().is_file())
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name.ends_with(".onnx"))
+        .collect();
+    names.sort();
+
+    MODEL_FILE_PREFIXES.iter()
+        .find_map(|prefix| names.iter().find(|name| name.starts_with(prefix)))
+        .map(|name| dir.join(name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Fresh empty directory under the system temp dir, removed on drop
+    struct TempDir(std::path::PathBuf);
+
+    impl TempDir {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir()
+                .join(format!("react-model-lookup-{}-{}", tag, std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+
+        fn touch(&self, name: &str) {
+            std::fs::write(self.0.join(name), b"x").unwrap();
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn model_lookup_prefers_the_default_file() {
+        let dir = TempDir::new("default");
+        dir.touch("dfine-m-coco.onnx");
+        dir.touch("rfdetr-a-other.onnx");
+        dir.touch(DEFAULT_MODEL_FILE);
+
+        assert_eq!(find_model_in_dir(&dir.0), Some(dir.0.join(DEFAULT_MODEL_FILE)));
+    }
+
+    #[test]
+    fn model_lookup_falls_back_to_other_exports() {
+        // Another RF-DETR export wins over a D-FINE one
+        let dir = TempDir::new("fallback-rfdetr");
+        dir.touch("dfine-m-coco.onnx");
+        dir.touch("rfdetr-small.onnx");
+        dir.touch("rfdetr-medium.onnx");
+        assert_eq!(find_model_in_dir(&dir.0), Some(dir.0.join("rfdetr-medium.onnx")));
+
+        // D-FINE exports are used when there is no RF-DETR one
+        let dir = TempDir::new("fallback-dfine");
+        dir.touch("dfine-s-coco.onnx");
+        dir.touch("dfine-m-obj365.onnx");
+        assert_eq!(find_model_in_dir(&dir.0), Some(dir.0.join("dfine-m-obj365.onnx")));
+    }
+
+    #[test]
+    fn model_lookup_ignores_other_files() {
+        let dir = TempDir::new("ignore");
+        dir.touch("yolov8m-world.onnx");
+        dir.touch("rfdetr-notes.txt");
+        dir.touch("README.md");
+
+        assert_eq!(find_model_in_dir(&dir.0), None);
+        assert_eq!(find_model_in_dir(&dir.0.join("missing")), None);
     }
 }

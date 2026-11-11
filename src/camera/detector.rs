@@ -1,31 +1,91 @@
 //! Object detection using ONNX Runtime
 //!
-//! Wraps YOLO-World for open-vocabulary object detection (13 custom classes).
+//! Runs a real-time detection transformer exported to ONNX. Two export formats
+//! are read, told apart by the graph's tensor names (see `models/README.md`):
+//!
+//! ```text
+//! RF-DETR (the default model, `rfdetr-nano.onnx`)
+//!   in   input   f32 [1, 3, H, W]  RGB, 0..1, ImageNet mean/std, frame stretched to WxH
+//!   out  dets    f32 [1, Q, 4]     cx, cy, w, h as fractions of the frame
+//!   out  labels  f32 [1, Q, C]     class logits; column = index into the label list
+//!
+//! D-FINE (`dfine-*.onnx`)
+//!   in   images             f32 [1, 3, H, W]  RGB, 0..1, frame stretched to WxH
+//!   in   orig_target_sizes  i64 [1, 2]        frame width, frame height
+//!   out  labels             i64 [1, Q]        index into the label list
+//!   out  boxes              f32 [1, Q, 4]     x1, y1, x2, y2 in frame pixels
+//!   out  scores             f32 [1, Q]
+//! ```
+//!
+//! The model file is self-describing: its ONNX metadata carries the label list
+//! (`labels`) and the classes the detector should report (`detect`), both as
+//! JSON arrays of strings written by `scripts/export-detector.py`. Nothing in
+//! this file knows which dataset the weights were trained on, so a model with a
+//! different label set is a model-file swap.
+//!
+//! Both models predict one box per object, so there is no NMS step.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
+#[cfg(feature = "camera")]
+use anyhow::Context;
 use std::path::PathBuf;
 
 use super::capture::CameraFrame;
 use super::state::{BBox, Detection};
 
-/// Detection model configuration
-#[derive(Clone, Debug)]
-pub struct DetectorConfig {
-    pub model_path: Option<PathBuf>,
-    pub input_size: (u32, u32),  // Model input dimensions (width, height)
-    pub confidence_threshold: f32,
-    pub iou_threshold: f32,
+/// Boxes narrower or shorter than this fraction of the frame are dropped
+const MIN_BOX_FRACTION: f32 = 0.01;
+
+/// ImageNet channel statistics: the input normalization RF-DETR is trained with
+const IMAGENET_MEAN: [f32; 3] = [0.485, 0.456, 0.406];
+const IMAGENET_STD: [f32; 3] = [0.229, 0.224, 0.225];
+
+/// Export formats the detector reads, told apart by the graph's tensor names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModelFormat {
+    /// RF-DETR: `input` -> `dets` (boxes), `labels` (class logits)
+    RfDetr,
+    /// D-FINE: `images`, `orig_target_sizes` -> `labels`, `boxes`, `scores`
+    DFine,
 }
 
-impl Default for DetectorConfig {
-    fn default() -> Self {
-        Self {
-            model_path: None,  // Will auto-detect
-            input_size: (640, 640),
-            confidence_threshold: 0.4,  // Higher threshold for better accuracy with YOLOv8m
-            iou_threshold: 0.45,
+impl ModelFormat {
+    /// Recognize the format from the graph's input and output names.
+    pub fn from_tensor_names<S: AsRef<str>>(inputs: &[S], outputs: &[S]) -> Option<Self> {
+        let has = |names: &[S], wanted: &str| names.iter().any(|n| n.as_ref() == wanted);
+        if has(inputs, "images") && has(inputs, "orig_target_sizes")
+            && has(outputs, "labels") && has(outputs, "boxes") && has(outputs, "scores")
+        {
+            Some(Self::DFine)
+        } else if has(inputs, "input") && has(outputs, "dets") && has(outputs, "labels") {
+            Some(Self::RfDetr)
+        } else {
+            None
         }
     }
+
+    /// Name of the image input tensor
+    pub fn image_input(self) -> &'static str {
+        match self {
+            Self::RfDetr => "input",
+            Self::DFine => "images",
+        }
+    }
+
+    /// Per-channel mean and standard deviation applied to the 0..1 image, if any
+    pub fn normalization(self) -> Option<([f32; 3], [f32; 3])> {
+        match self {
+            Self::RfDetr => Some((IMAGENET_MEAN, IMAGENET_STD)),
+            Self::DFine => None,
+        }
+    }
+}
+
+/// Detection model configuration
+#[derive(Clone, Debug, Default)]
+pub struct DetectorConfig {
+    /// Explicit model path; `None` auto-detects (see `TrackingConfig::find_model_path`)
+    pub model_path: Option<PathBuf>,
 }
 
 impl DetectorConfig {
@@ -35,22 +95,296 @@ impl DetectorConfig {
     }
 }
 
-/// ONNX-based object detector using YOLOv8
+/// Label names of the loaded model and the subset of classes the detector reports.
+#[derive(Clone, Debug, Default)]
+pub struct ClassTable {
+    names: Vec<String>,
+    /// `enabled[id]`; empty means every class is reported
+    enabled: Vec<bool>,
+}
+
+impl ClassTable {
+    /// Build from the model's `labels` and `detect` metadata values.
+    ///
+    /// Both are JSON arrays of strings. `labels[i]` names class index `i`; an
+    /// empty string marks an index the model does not use (COCO category ids
+    /// have such gaps) and is never reported. `detect` lists the class names to
+    /// report (matched case-insensitively); when it is missing, empty, or names
+    /// nothing in `labels`, every named class is reported.
+    pub fn from_metadata(labels_json: Option<&str>, detect_json: Option<&str>) -> Self {
+        let names = parse_string_array(labels_json, "labels");
+        let detect = parse_string_array(detect_json, "detect");
+
+        let mut enabled = Vec::new();
+        if !detect.is_empty() && !names.is_empty() {
+            enabled = vec![false; names.len()];
+            for wanted in detect.iter().filter(|w| !w.is_empty()) {
+                match names.iter().position(|n| n.eq_ignore_ascii_case(wanted)) {
+                    Some(id) => enabled[id] = true,
+                    None => log::warn!("[Detector] 'detect' names unknown class {:?}", wanted),
+                }
+            }
+            if !enabled.iter().any(|&e| e) {
+                log::warn!("[Detector] 'detect' matched no label; reporting every class");
+                enabled.clear();
+            }
+        }
+        // Without a filter, a label list with gaps still never reports the gaps
+        if enabled.is_empty() && names.iter().any(|n| n.is_empty()) {
+            enabled = names.iter().map(|n| !n.is_empty()).collect();
+        }
+
+        Self { names, enabled }
+    }
+
+    /// Human-readable name for a class index (`class_N` when the model has no label for it)
+    pub fn name(&self, id: usize) -> String {
+        match self.names.get(id) {
+            Some(name) if !name.is_empty() => name.clone(),
+            _ => format!("class_{}", id),
+        }
+    }
+
+    /// Should detections of this class be reported?
+    pub fn is_enabled(&self, id: usize) -> bool {
+        self.enabled.is_empty() || self.enabled.get(id).copied().unwrap_or(false)
+    }
+
+    /// Number of named classes the model declares
+    pub fn len(&self) -> usize {
+        self.names.iter().filter(|n| !n.is_empty()).count()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Names of the classes that are reported (every label when nothing is filtered)
+    pub fn enabled_names(&self) -> Vec<&str> {
+        self.names.iter().enumerate()
+            .filter(|(id, name)| !name.is_empty() && self.is_enabled(*id))
+            .map(|(_, n)| n.as_str())
+            .collect()
+    }
+}
+
+fn parse_string_array(json: Option<&str>, key: &str) -> Vec<String> {
+    match json {
+        None => Vec::new(),
+        Some(text) => serde_json::from_str::<Vec<String>>(text).unwrap_or_else(|e| {
+            log::error!("[Detector] Model metadata '{}' is not a JSON string array: {}", key, e);
+            Vec::new()
+        }),
+    }
+}
+
+/// Convert RF-DETR output tensors into detections with normalized boxes.
+///
+/// `boxes` holds `cx, cy, w, h` as fractions of the frame for each query and
+/// `logits` holds `num_classes` class logits per query. A query reports its
+/// best enabled class when that class's probability (the sigmoid of its logit)
+/// reaches `threshold`, which is RF-DETR's own post-processing followed by the
+/// class filter. Results are appended to `out`.
+pub fn decode_rfdetr(
+    boxes: &[f32],
+    logits: &[f32],
+    num_classes: usize,
+    threshold: f32,
+    classes: &ClassTable,
+    out: &mut Vec<Detection>,
+) {
+    if num_classes == 0 {
+        return;
+    }
+    let count = (boxes.len() / 4).min(logits.len() / num_classes);
+
+    for i in 0..count {
+        let row = &logits[i * num_classes..(i + 1) * num_classes];
+        let mut best: Option<(usize, f32)> = None;
+        for (class_id, &logit) in row.iter().enumerate() {
+            // NaN never compares greater, so it is never picked
+            let better = match best {
+                Some((_, top)) => logit > top,
+                None => !logit.is_nan(),
+            };
+            if better && classes.is_enabled(class_id) {
+                best = Some((class_id, logit));
+            }
+        }
+        let Some((class_id, logit)) = best else { continue };
+
+        let score = 1.0 / (1.0 + (-logit).exp());
+        if !(score >= threshold) {
+            continue;
+        }
+
+        let b = &boxes[i * 4..i * 4 + 4];
+        let (half_w, half_h) = (b[2] / 2.0, b[3] / 2.0);
+        push_detection(
+            [b[0] - half_w, b[1] - half_h, b[0] + half_w, b[1] + half_h],
+            class_id, score, classes, out,
+        );
+    }
+}
+
+/// Convert D-FINE output tensors into detections with normalized boxes.
+///
+/// `boxes` holds `x1, y1, x2, y2` in frame pixels for each query. Detections
+/// below `threshold`, of a class that is not enabled, or with a degenerate box
+/// are skipped. Results are appended to `out`.
+pub fn decode_dfine(
+    labels: &[i64],
+    boxes: &[f32],
+    scores: &[f32],
+    frame_width: u32,
+    frame_height: u32,
+    threshold: f32,
+    classes: &ClassTable,
+    out: &mut Vec<Detection>,
+) {
+    if frame_width == 0 || frame_height == 0 {
+        return;
+    }
+    let fw = frame_width as f32;
+    let fh = frame_height as f32;
+    let count = labels.len().min(scores.len()).min(boxes.len() / 4);
+
+    for i in 0..count {
+        let score = scores[i];
+        // `!(a >= b)` also rejects NaN scores
+        if !(score >= threshold) {
+            continue;
+        }
+        let Ok(class_id) = usize::try_from(labels[i]) else { continue };
+        if !classes.is_enabled(class_id) {
+            continue;
+        }
+
+        let b = &boxes[i * 4..i * 4 + 4];
+        push_detection(
+            [b[0] / fw, b[1] / fh, b[2] / fw, b[3] / fh],
+            class_id, score, classes, out,
+        );
+    }
+}
+
+/// Clamp a corner box (`x1, y1, x2, y2` as fractions of the frame) to the frame
+/// and append it as a detection, unless it is non-finite or degenerate.
+fn push_detection(
+    corners: [f32; 4],
+    class_id: usize,
+    score: f32,
+    classes: &ClassTable,
+    out: &mut Vec<Detection>,
+) {
+    if !corners.iter().all(|v| v.is_finite()) {
+        return;
+    }
+    let x1 = corners[0].clamp(0.0, 1.0);
+    let y1 = corners[1].clamp(0.0, 1.0);
+    let x2 = corners[2].clamp(0.0, 1.0);
+    let y2 = corners[3].clamp(0.0, 1.0);
+    let w = x2 - x1;
+    let h = y2 - y1;
+    if w < MIN_BOX_FRACTION || h < MIN_BOX_FRACTION {
+        return;
+    }
+
+    out.push(Detection::new(
+        class_id,
+        classes.name(class_id),
+        BBox::new((x1 + x2) / 2.0, (y1 + y2) / 2.0, w, h),
+        score.min(1.0),
+    ));
+}
+
+/// Stretch an RGB or RGBA frame to `target_w` x `target_h` (bilinear) and write
+/// it into `out` as planar CHW floats: 0..1, then `(value - mean) / std` per
+/// channel when `normalization` gives a mean and standard deviation.
+///
+/// Both model families are trained on images resized without keeping the
+/// aspect ratio, so the frame is stretched, not letterboxed. `out` must hold
+/// `3 * target_w * target_h` values; it is zero-filled when the frame buffer is
+/// too short.
+pub fn preprocess_frame(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    target_w: u32,
+    target_h: u32,
+    normalization: Option<([f32; 3], [f32; 3])>,
+    out: &mut [f32],
+) {
+    let (w, h) = (width as usize, height as usize);
+    let (tw, th) = (target_w as usize, target_h as usize);
+    let plane = tw * th;
+    if out.len() < 3 * plane {
+        return;
+    }
+
+    let channels = if w * h > 0 && data.len() == w * h * 4 { 4 } else { 3 };
+    if w == 0 || h == 0 || data.len() < w * h * channels {
+        out[..3 * plane].fill(0.0);
+        return;
+    }
+
+    // Source column for each target column: left index, right index, blend weight
+    let columns: Vec<(usize, usize, f32)> = (0..tw)
+        .map(|tx| sample_position(tx, tw, w))
+        .collect();
+
+    // value = (pixel / 255 - mean) / std = pixel * scale + offset
+    let mut scale = [1.0 / 255.0f32; 3];
+    let mut offset = [0.0f32; 3];
+    if let Some((mean, std)) = normalization {
+        for c in 0..3 {
+            scale[c] = 1.0 / (255.0 * std[c]);
+            offset[c] = -mean[c] / std[c];
+        }
+    }
+
+    for ty in 0..th {
+        let (y0, y1, wy) = sample_position(ty, th, h);
+        let row0 = y0 * w * channels;
+        let row1 = y1 * w * channels;
+        let out_row = ty * tw;
+
+        for (tx, &(x0, x1, wx)) in columns.iter().enumerate() {
+            let p00 = row0 + x0 * channels;
+            let p01 = row0 + x1 * channels;
+            let p10 = row1 + x0 * channels;
+            let p11 = row1 + x1 * channels;
+
+            for c in 0..3 {
+                let top = data[p00 + c] as f32 * (1.0 - wx) + data[p01 + c] as f32 * wx;
+                let bottom = data[p10 + c] as f32 * (1.0 - wx) + data[p11 + c] as f32 * wx;
+                out[c * plane + out_row + tx] =
+                    (top * (1.0 - wy) + bottom * wy) * scale[c] + offset[c];
+            }
+        }
+    }
+}
+
+/// Bilinear sample position for target index `t` (pixel centres aligned)
+fn sample_position(t: usize, target_len: usize, source_len: usize) -> (usize, usize, f32) {
+    let pos = ((t as f32 + 0.5) * source_len as f32 / target_len as f32 - 0.5).max(0.0);
+    let i0 = (pos as usize).min(source_len - 1);
+    let i1 = (i0 + 1).min(source_len - 1);
+    (i0, i1, pos - i0 as f32)
+}
+
+/// ONNX-based object detector
 pub struct Detector {
-    config: DetectorConfig,
     #[cfg(feature = "camera")]
     session: ort::session::Session,
+    /// Export format of the loaded model
+    format: ModelFormat,
+    /// Model input size (width, height), read from the model
+    input_size: (u32, u32),
     // Pre-allocated buffers
     input_buffer: Vec<f32>,
     output_buffer: Vec<Detection>,
-    // Letterbox padding info for coordinate mapping
-    pad_x: u32,
-    pad_y: u32,
-    scale: f32,
-    // Number of classes in the loaded model (detected from output shape)
-    num_model_classes: usize,
-    // Class names loaded from classes.json (None = use hardcoded fallbacks)
-    class_names: Option<Vec<String>>,
+    classes: ClassTable,
 }
 
 impl Detector {
@@ -59,81 +393,72 @@ impl Detector {
     }
 
     pub fn with_config(config: DetectorConfig) -> Result<Self> {
-        use super::state::{TrackingConfig, load_classes_from_json};
-
-        let input_size = config.input_size.0 as usize * config.input_size.1 as usize * 3;
+        use super::state::TrackingConfig;
 
         // Find model path: use configured path, or auto-detect
         let model_path = config.model_path.clone()
-            .or_else(|| TrackingConfig::find_model_path());
+            .or_else(TrackingConfig::find_model_path);
 
         let model_path = match model_path {
             Some(p) if p.exists() => p,
-            Some(p) => bail!("ONNX model not found at {:?}", p),
-            None => bail!("No ONNX model found. Place yolov8m-world.onnx in models/ directory"),
+            Some(p) => bail!("Detection model not found at {:?}", p),
+            None => bail!(
+                "No detection model found. Export one into models/ with \
+                 scripts/export-detector.py (see models/README.md)"
+            ),
         };
 
         log::info!("[Detector] Loading ONNX model from {:?}", model_path);
 
-        // Load class names from classes.json if it exists
-        let class_names = load_classes_from_json(&model_path);
-
         #[cfg(feature = "camera")]
-        let session = Self::load_session(&model_path)?;
-
-        log::info!("[Detector] ONNX model loaded successfully");
-
-        // Detect number of classes from model output shape
-        #[cfg(feature = "camera")]
-        let num_model_classes = {
-            use ort::value::ValueType;
-            let outputs = session.outputs();
-            if let Some(output) = outputs.first() {
-                // Output shape is typically [1, 4+num_classes, 8400]
-                if let ValueType::Tensor { shape, .. } = output.dtype() {
-                    if let Some(&dim1) = shape.get(1) {
-                        let classes = (dim1 as usize).saturating_sub(4);
-                        log::info!("[Detector] Model has {} classes (output dim: {})", classes, dim1);
-                        classes
-                    } else {
-                        log::warn!("[Detector] Could not get dim1 from shape, assuming REACT (13)");
-                        13
-                    }
-                } else {
-                    log::warn!("[Detector] Output is not a tensor, assuming REACT (13)");
-                    13
-                }
-            } else {
-                13
-            }
-        };
+        let (session, format, input_size, classes) = Self::load_session(&model_path)?;
+        // Without the camera feature nothing is loaded and `detect` returns nothing
         #[cfg(not(feature = "camera"))]
-        let num_model_classes = 80;
+        let (format, input_size, classes) = (ModelFormat::RfDetr, (0, 0), ClassTable::default());
 
-        // Log class info
-        if class_names.is_empty() {
-            log::warn!("[Detector] No classes.json found - labels will show as class_0, class_1, etc.");
+        if classes.is_empty() {
+            log::warn!("[Detector] Model has no 'labels' metadata - labels will show as class_0, class_1, etc.");
         } else {
-            log::info!("[Detector] Using {} classes from classes.json", class_names.len());
+            log::info!(
+                "[Detector] {} labels, reporting: {:?}",
+                classes.len(),
+                classes.enabled_names().iter().take(12).collect::<Vec<_>>()
+            );
         }
 
+        let input_len = input_size.0 as usize * input_size.1 as usize * 3;
         Ok(Self {
-            config,
             #[cfg(feature = "camera")]
             session,
-            input_buffer: vec![0.0; input_size],
+            format,
+            input_size,
+            input_buffer: vec![0.0; input_len],
             output_buffer: Vec::with_capacity(100),
-            pad_x: 0,
-            pad_y: 0,
-            scale: 1.0,
-            num_model_classes,
-            class_names: if class_names.is_empty() { None } else { Some(class_names) },
+            classes,
         })
     }
 
+    /// Export format of the loaded model
+    pub fn format(&self) -> ModelFormat {
+        self.format
+    }
+
+    /// Model input size (width, height)
+    pub fn input_size(&self) -> (u32, u32) {
+        self.input_size
+    }
+
+    /// Labels of the loaded model and which of them are reported
+    pub fn classes(&self) -> &ClassTable {
+        &self.classes
+    }
+
     #[cfg(feature = "camera")]
-    fn load_session(model_path: &PathBuf) -> Result<ort::session::Session> {
+    fn load_session(
+        model_path: &PathBuf,
+    ) -> Result<(ort::session::Session, ModelFormat, (u32, u32), ClassTable)> {
         use ort::session::Session;
+        use ort::value::ValueType;
 
         let session = Session::builder()
             .context("Failed to create session builder")?
@@ -142,10 +467,51 @@ impl Detector {
             .commit_from_file(model_path)
             .context("Failed to load model file")?;
 
-        Ok(session)
+        // Reject anything the decoders do not understand before the first frame
+        let input_names: Vec<String> = session.inputs().iter().map(|i| i.name().to_string()).collect();
+        let output_names: Vec<String> = session.outputs().iter().map(|o| o.name().to_string()).collect();
+        let Some(format) = ModelFormat::from_tensor_names(&input_names, &output_names) else {
+            bail!(
+                "{:?} is not an RF-DETR or D-FINE export (inputs {:?}, outputs {:?}). \
+                 Re-export with scripts/export-detector.py (see models/README.md)",
+                model_path, input_names, output_names
+            );
+        };
+
+        // Input size from the image input's shape [1, 3, H, W]; it must be fixed
+        let input_size = session.inputs().iter()
+            .find(|i| i.name() == format.image_input())
+            .and_then(|input| match input.dtype() {
+                ValueType::Tensor { shape, .. } => match (shape.get(2), shape.get(3)) {
+                    (Some(&h), Some(&w)) if h > 0 && w > 0 => Some((w as u32, h as u32)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .with_context(|| format!(
+                "{:?} has no fixed input size. Re-export with scripts/export-detector.py",
+                model_path
+            ))?;
+
+        let classes = match session.metadata() {
+            Ok(meta) => ClassTable::from_metadata(
+                meta.custom("labels").as_deref(),
+                meta.custom("detect").as_deref(),
+            ),
+            Err(e) => {
+                log::warn!("[Detector] Could not read model metadata: {}", e);
+                ClassTable::default()
+            }
+        };
+
+        log::info!(
+            "[Detector] {:?} model loaded, input {}x{}",
+            format, input_size.0, input_size.1
+        );
+        Ok((session, format, input_size, classes))
     }
 
-    /// Run detection on a camera frame - returns ALL detected objects
+    /// Run detection on a camera frame - returns every detected object of an enabled class
     pub fn detect(&mut self, frame: &CameraFrame, threshold: f32) -> Result<Vec<Detection>> {
         self.output_buffer.clear();
 
@@ -157,240 +523,492 @@ impl Detector {
         {
             self.detect_onnx(frame, threshold)?;
         }
+        #[cfg(not(feature = "camera"))]
+        {
+            let _ = threshold;
+        }
 
         Ok(self.output_buffer.clone())
     }
 
-    /// Real ONNX inference using YOLOv8
     #[cfg(feature = "camera")]
     fn detect_onnx(&mut self, frame: &CameraFrame, threshold: f32) -> Result<()> {
-        use ort::value::Tensor;
+        use ort::value::{Tensor, TensorRef};
 
-        let (target_w, target_h) = self.config.input_size;
+        let (target_w, target_h) = self.input_size;
+        preprocess_frame(
+            &frame.data, frame.width, frame.height,
+            target_w, target_h, self.format.normalization(), &mut self.input_buffer,
+        );
 
-        // Preprocess frame to CHW normalized format with letterboxing
-        self.preprocess_frame(frame, target_w, target_h);
+        let images = TensorRef::from_array_view((
+            [1usize, 3, target_h as usize, target_w as usize],
+            self.input_buffer.as_slice(),
+        )).context("Failed to create image tensor")?;
 
-        // Create input tensor [1, 3, H, W]
-        let input_shape = [1usize, 3, target_h as usize, target_w as usize];
-        let input_data = self.input_buffer.clone();
+        match self.format {
+            ModelFormat::RfDetr => {
+                let outputs = self.session
+                    .run(ort::inputs!["input" => images])
+                    .context("Failed to run inference")?;
 
-        let input_tensor = Tensor::from_array((input_shape, input_data))
-            .context("Failed to create input tensor")?;
+                let (_, boxes) = outputs.get("dets").context("Model output 'dets' missing")?
+                    .try_extract_tensor::<f32>().context("Failed to read 'dets'")?;
+                let (_, logits) = outputs.get("labels").context("Model output 'labels' missing")?
+                    .try_extract_tensor::<f32>().context("Failed to read 'labels'")?;
 
-        // Run inference - extract data to owned Vec to avoid borrow conflicts
-        let output_data: Vec<f32> = {
-            let inputs = ort::inputs!["images" => input_tensor];
-            let outputs = self.session.run(inputs)
-                .context("Failed to run inference")?;
+                let queries = boxes.len() / 4;
+                let num_classes = if queries > 0 { logits.len() / queries } else { 0 };
+                decode_rfdetr(
+                    boxes, logits, num_classes, threshold,
+                    &self.classes, &mut self.output_buffer,
+                );
+            }
+            ModelFormat::DFine => {
+                let sizes = Tensor::from_array((
+                    [1usize, 2],
+                    vec![frame.width as i64, frame.height as i64],
+                )).context("Failed to create size tensor")?;
 
-            // Get output tensor - YOLOv8 output is [1, 84, 8400]
-            let output = outputs.iter().next()
-                .context("No output tensor")?;
-            let (_shape, data) = output.1.try_extract_tensor::<f32>()
-                .context("Failed to extract output tensor")?;
+                let outputs = self.session
+                    .run(ort::inputs!["images" => images, "orig_target_sizes" => sizes])
+                    .context("Failed to run inference")?;
 
-            data.to_vec()
-        };
+                let (_, labels) = outputs.get("labels").context("Model output 'labels' missing")?
+                    .try_extract_tensor::<i64>().context("Failed to read 'labels'")?;
+                let (_, boxes) = outputs.get("boxes").context("Model output 'boxes' missing")?
+                    .try_extract_tensor::<f32>().context("Failed to read 'boxes'")?;
+                let (_, scores) = outputs.get("scores").context("Model output 'scores' missing")?
+                    .try_extract_tensor::<f32>().context("Failed to read 'scores'")?;
 
-        // Parse YOLOv8 output format - detect ALL classes
-        self.parse_yolov8_output(&output_data, threshold, frame.width, frame.height)?;
-
-        // Apply NMS
-        self.apply_nms(self.config.iou_threshold);
+                decode_dfine(
+                    labels, boxes, scores,
+                    frame.width, frame.height, threshold,
+                    &self.classes, &mut self.output_buffer,
+                );
+            }
+        }
 
         Ok(())
     }
+}
 
-    /// Parse YOLO-World output tensor [1, 4+num_classes, 8400]
-    /// Uses the detected num_model_classes from the loaded model
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LABELS: &str = r#"["person", "bicycle", "car"]"#;
+
+    fn decode(
+        labels: &[i64], boxes: &[f32], scores: &[f32],
+        threshold: f32, classes: &ClassTable,
+    ) -> Vec<Detection> {
+        let mut out = Vec::new();
+        decode_dfine(labels, boxes, scores, 640, 480, threshold, classes, &mut out);
+        out
+    }
+
+    fn close(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-5
+    }
+
+    /// COCO-style label list with an unused index 0 and a gap at index 3
+    const GAPPED_LABELS: &str = r#"["", "person", "bicycle", "", "car"]"#;
+
+    /// Logit whose sigmoid is `p`
+    fn logit(p: f32) -> f32 {
+        (p / (1.0 - p)).ln()
+    }
+
+    fn decode_rf(boxes: &[f32], logits: &[f32], num_classes: usize, classes: &ClassTable) -> Vec<Detection> {
+        let mut out = Vec::new();
+        decode_rfdetr(boxes, logits, num_classes, 0.5, classes, &mut out);
+        out
+    }
+
+    #[test]
+    fn model_format_is_told_apart_by_tensor_names() {
+        assert_eq!(
+            ModelFormat::from_tensor_names(&["input"], &["dets", "labels"]),
+            Some(ModelFormat::RfDetr)
+        );
+        assert_eq!(
+            ModelFormat::from_tensor_names(&["images", "orig_target_sizes"], &["labels", "boxes", "scores"]),
+            Some(ModelFormat::DFine)
+        );
+        // The old YOLO export and half-matching graphs are rejected
+        assert_eq!(ModelFormat::from_tensor_names(&["images"], &["output0"]), None);
+        assert_eq!(ModelFormat::from_tensor_names(&["input"], &["labels"]), None);
+        assert_eq!(ModelFormat::from_tensor_names(&["images"], &["labels", "boxes", "scores"]), None);
+
+        assert_eq!(ModelFormat::RfDetr.image_input(), "input");
+        assert!(ModelFormat::RfDetr.normalization().is_some());
+        assert_eq!(ModelFormat::DFine.image_input(), "images");
+        assert!(ModelFormat::DFine.normalization().is_none());
+    }
+
+    #[test]
+    fn class_table_never_reports_unnamed_slots() {
+        let all = ClassTable::from_metadata(Some(GAPPED_LABELS), None);
+        assert_eq!(all.len(), 3);
+        assert!(!all.is_enabled(0) && !all.is_enabled(3));
+        assert!(all.is_enabled(1) && all.is_enabled(2) && all.is_enabled(4));
+        assert_eq!(all.enabled_names(), vec!["person", "bicycle", "car"]);
+        assert_eq!(all.name(3), "class_3");
+
+        // An empty name in the detect list does not switch the gaps on
+        let filtered = ClassTable::from_metadata(Some(GAPPED_LABELS), Some(r#"["", "car"]"#));
+        assert!(!filtered.is_enabled(0) && !filtered.is_enabled(1) && filtered.is_enabled(4));
+        assert_eq!(filtered.enabled_names(), vec!["car"]);
+    }
+
+    #[test]
+    fn rfdetr_decode_converts_centre_boxes_and_logits() {
+        let classes = ClassTable::from_metadata(Some(GAPPED_LABELS), None);
+        // One query: centre (0.5, 0.4), size 0.2 x 0.6, person at 0.9
+        let logits = [-9.0, logit(0.9), -4.0, -9.0, -3.0];
+        let dets = decode_rf(&[0.5, 0.4, 0.2, 0.6], &logits, 5, &classes);
+
+        assert_eq!(dets.len(), 1);
+        let d = &dets[0];
+        assert_eq!(d.class_id, 1);
+        assert_eq!(d.class_name, "person");
+        assert!(close(d.score, 0.9));
+        assert!(close(d.bbox.x, 0.5) && close(d.bbox.y, 0.4));
+        assert!(close(d.bbox.w, 0.2) && close(d.bbox.h, 0.6));
+    }
+
+    #[test]
+    fn rfdetr_decode_applies_threshold_to_the_probability() {
+        let classes = ClassTable::from_metadata(Some(GAPPED_LABELS), None);
+        let boxes = [
+            0.2, 0.2, 0.2, 0.2,
+            0.5, 0.5, 0.2, 0.2,
+            0.8, 0.8, 0.2, 0.2,
+        ];
+        let logits = [
+            -9.0, logit(0.8), -9.0, -9.0, -9.0,   // person 0.8: kept
+            -9.0, -9.0, logit(0.49), -9.0, -9.0,  // bicycle 0.49: dropped
+            -9.0, -9.0, -9.0, -9.0, 0.0,          // car at exactly 0.5: kept
+        ];
+        let dets = decode_rf(&boxes, &logits, 5, &classes);
+
+        assert_eq!(dets.len(), 2);
+        assert_eq!(dets[0].class_name, "person");
+        assert_eq!(dets[1].class_name, "car");
+        assert!(close(dets[1].score, 0.5));
+    }
+
+    #[test]
+    fn rfdetr_decode_picks_the_best_enabled_class() {
+        let person_only = ClassTable::from_metadata(Some(GAPPED_LABELS), Some(r#"["person"]"#));
+        let boxes = [
+            0.3, 0.5, 0.2, 0.4,
+            0.7, 0.5, 0.2, 0.4,
+        ];
+        let logits = [
+            -9.0, logit(0.6), -9.0, -9.0, logit(0.95),  // car scores higher, person still passes
+            -9.0, logit(0.2), -9.0, -9.0, logit(0.95),  // only a car
+        ];
+        let dets = decode_rf(&boxes, &logits, 5, &person_only);
+        assert_eq!(dets.len(), 1);
+        assert_eq!(dets[0].class_name, "person");
+        assert!(close(dets[0].score, 0.6));
+        assert!(close(dets[0].bbox.x, 0.3));
+
+        // Unnamed slots are never reported, even with the highest logit
+        let all = ClassTable::from_metadata(Some(GAPPED_LABELS), None);
+        let dets = decode_rf(&[0.5, 0.5, 0.2, 0.2], &[9.0, logit(0.7), -9.0, 9.0, -9.0], 5, &all);
+        assert_eq!(dets.len(), 1);
+        assert_eq!(dets[0].class_name, "person");
+    }
+
+    #[test]
+    fn rfdetr_decode_clamps_and_skips_bad_boxes() {
+        let classes = ClassTable::from_metadata(Some(GAPPED_LABELS), None);
+        let hit = [-9.0, logit(0.9), -9.0, -9.0, -9.0];
+
+        // Box hangs over the right and bottom edges: clamped to the frame
+        let dets = decode_rf(&[0.9, 0.9, 0.4, 0.4], &hit, 5, &classes);
+        assert_eq!(dets.len(), 1);
+        assert!(close(dets[0].bbox.w, 0.3) && close(dets[0].bbox.h, 0.3));
+        assert!(close(dets[0].bbox.x, 0.85) && close(dets[0].bbox.y, 0.85));
+
+        // Too thin, non-finite box, NaN logits
+        assert!(decode_rf(&[0.5, 0.5, 0.005, 0.5], &hit, 5, &classes).is_empty());
+        assert!(decode_rf(&[f32::NAN, 0.5, 0.2, 0.2], &hit, 5, &classes).is_empty());
+        assert!(decode_rf(&[0.5, 0.5, 0.2, 0.2], &[f32::NAN; 5], 5, &classes).is_empty());
+    }
+
+    #[test]
+    fn rfdetr_decode_tolerates_mismatched_tensor_lengths() {
+        let classes = ClassTable::from_metadata(Some(GAPPED_LABELS), None);
+        let hit = [-9.0, logit(0.9), -9.0, -9.0, -9.0];
+        // Two boxes but logits for one query, plus a stray value
+        let mut logits = hit.to_vec();
+        logits.push(1.0);
+        let dets = decode_rf(&[0.3, 0.3, 0.2, 0.2, 0.7, 0.7, 0.2, 0.2], &logits, 5, &classes);
+        assert_eq!(dets.len(), 1);
+
+        assert!(decode_rf(&[0.3, 0.3, 0.2, 0.2], &hit, 0, &classes).is_empty());
+        assert!(decode_rf(&[], &[], 5, &classes).is_empty());
+    }
+
+    #[test]
+    fn preprocess_applies_mean_and_std() {
+        // One pixel stretched to 2x2: every output value is (pixel / 255 - mean) / std
+        let frame = [255, 0, 51];
+        let mean = [0.5, 0.25, 0.2];
+        let std = [0.5, 0.25, 0.1];
+        let mut out = vec![9.0f32; 3 * 4];
+        preprocess_frame(&frame, 1, 1, 2, 2, Some((mean, std)), &mut out);
+
+        for i in 0..4 {
+            assert!(close(out[i], 1.0));       // (1.0 - 0.5) / 0.5
+            assert!(close(out[4 + i], -1.0));  // (0.0 - 0.25) / 0.25
+            assert!(close(out[8 + i], 0.0));   // (0.2 - 0.2) / 0.1
+        }
+    }
+
+    #[test]
+    fn class_table_reports_everything_without_detect_list() {
+        let classes = ClassTable::from_metadata(Some(LABELS), None);
+        assert_eq!(classes.len(), 3);
+        assert!(classes.is_enabled(0) && classes.is_enabled(2));
+        assert_eq!(classes.name(1), "bicycle");
+        assert_eq!(classes.enabled_names(), vec!["person", "bicycle", "car"]);
+    }
+
+    #[test]
+    fn class_table_applies_detect_list_case_insensitively() {
+        let classes = ClassTable::from_metadata(Some(LABELS), Some(r#"["Person", "CAR"]"#));
+        assert!(classes.is_enabled(0));
+        assert!(!classes.is_enabled(1));
+        assert!(classes.is_enabled(2));
+        // An index past the label list is never reported when a filter is active
+        assert!(!classes.is_enabled(7));
+        assert_eq!(classes.enabled_names(), vec!["person", "car"]);
+    }
+
+    #[test]
+    fn class_table_ignores_detect_list_that_matches_nothing() {
+        let classes = ClassTable::from_metadata(Some(LABELS), Some(r#"["guitar"]"#));
+        assert!(classes.is_enabled(0) && classes.is_enabled(1) && classes.is_enabled(2));
+    }
+
+    #[test]
+    fn class_table_without_labels_uses_generic_names() {
+        let classes = ClassTable::from_metadata(None, Some(r#"["person"]"#));
+        assert!(classes.is_empty());
+        assert_eq!(classes.name(4), "class_4");
+        assert!(classes.is_enabled(4));
+
+        let broken = ClassTable::from_metadata(Some("not json"), None);
+        assert!(broken.is_empty());
+    }
+
+    #[test]
+    fn decode_normalizes_pixel_boxes() {
+        let classes = ClassTable::from_metadata(Some(LABELS), None);
+        // One person at x 160..480, y 120..360 in a 640x480 frame
+        let dets = decode(&[0], &[160.0, 120.0, 480.0, 360.0], &[0.9], 0.5, &classes);
+
+        assert_eq!(dets.len(), 1);
+        let d = &dets[0];
+        assert_eq!(d.class_id, 0);
+        assert_eq!(d.class_name, "person");
+        assert!(close(d.score, 0.9));
+        assert!(close(d.bbox.x, 0.5) && close(d.bbox.y, 0.5));
+        assert!(close(d.bbox.w, 0.5) && close(d.bbox.h, 0.5));
+    }
+
+    #[test]
+    fn decode_applies_threshold_and_keeps_order() {
+        let classes = ClassTable::from_metadata(Some(LABELS), None);
+        let boxes = [
+            0.0, 0.0, 100.0, 100.0,
+            100.0, 100.0, 300.0, 300.0,
+            300.0, 200.0, 600.0, 400.0,
+        ];
+        let dets = decode(&[0, 2, 1], &boxes, &[0.8, 0.49, 0.5], 0.5, &classes);
+
+        assert_eq!(dets.len(), 2);
+        assert_eq!(dets[0].class_name, "person");
+        assert_eq!(dets[1].class_name, "bicycle");
+    }
+
+    #[test]
+    fn decode_drops_classes_that_are_not_enabled() {
+        let classes = ClassTable::from_metadata(Some(LABELS), Some(r#"["person"]"#));
+        let boxes = [0.0, 0.0, 100.0, 100.0, 100.0, 100.0, 300.0, 300.0];
+        let dets = decode(&[2, 0], &boxes, &[0.95, 0.7], 0.5, &classes);
+
+        assert_eq!(dets.len(), 1);
+        assert_eq!(dets[0].class_name, "person");
+        assert!(close(dets[0].score, 0.7));
+    }
+
+    #[test]
+    fn decode_clamps_boxes_to_the_frame() {
+        let classes = ClassTable::from_metadata(Some(LABELS), None);
+        // Box hangs off the left/top and right/bottom edges
+        let dets = decode(&[0], &[-50.0, -20.0, 700.0, 500.0], &[0.9], 0.5, &classes);
+
+        assert_eq!(dets.len(), 1);
+        assert!(close(dets[0].bbox.x, 0.5) && close(dets[0].bbox.y, 0.5));
+        assert!(close(dets[0].bbox.w, 1.0) && close(dets[0].bbox.h, 1.0));
+    }
+
+    #[test]
+    fn decode_skips_degenerate_and_invalid_entries() {
+        let classes = ClassTable::from_metadata(Some(LABELS), None);
+        let boxes = [
+            10.0, 10.0, 12.0, 300.0,                  // 2 px wide: under 1% of the frame
+            f32::NAN, 0.0, 100.0, 100.0,              // non-finite coordinate
+            0.0, 0.0, 100.0, 100.0,                   // negative label
+            0.0, 0.0, 100.0, 100.0,                   // NaN score
+            200.0, 200.0, 100.0, 100.0,               // inverted box
+        ];
+        let dets = decode(&[0, 0, -1, 0, 0], &boxes, &[0.9, 0.9, 0.9, f32::NAN, 0.9], 0.5, &classes);
+        assert!(dets.is_empty());
+    }
+
+    #[test]
+    fn decode_tolerates_mismatched_tensor_lengths() {
+        let classes = ClassTable::from_metadata(Some(LABELS), None);
+        // Three labels and scores but only two complete boxes
+        let boxes = [0.0, 0.0, 100.0, 100.0, 100.0, 100.0, 300.0, 300.0, 5.0];
+        let dets = decode(&[0, 1, 2], &boxes, &[0.9, 0.9, 0.9], 0.5, &classes);
+        assert_eq!(dets.len(), 2);
+
+        let mut out = Vec::new();
+        decode_dfine(&[0], &[0.0, 0.0, 10.0, 10.0], &[0.9], 0, 0, 0.5, &classes, &mut out);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn decode_names_labels_the_model_does_not_declare() {
+        let classes = ClassTable::default();
+        let dets = decode(&[41], &[0.0, 0.0, 320.0, 240.0], &[0.6], 0.5, &classes);
+        assert_eq!(dets.len(), 1);
+        assert_eq!(dets[0].class_id, 41);
+        assert_eq!(dets[0].class_name, "class_41");
+    }
+
+    #[test]
+    fn preprocess_writes_planar_rgb_in_unit_range() {
+        // 2x2 RGB frame, same size as the target: pixels pass through unchanged
+        let frame = [
+            255, 0, 0,    0, 255, 0,
+            0, 0, 255,    51, 102, 153,
+        ];
+        let mut out = vec![9.0f32; 12];
+        preprocess_frame(&frame, 2, 2, 2, 2, None, &mut out);
+
+        let expected = [
+            1.0, 0.0, 0.0, 0.2, // R plane
+            0.0, 1.0, 0.0, 0.4, // G plane
+            0.0, 0.0, 1.0, 0.6, // B plane
+        ];
+        for (got, want) in out.iter().zip(expected.iter()) {
+            assert!(close(*got, *want), "got {:?}, want {:?}", out, expected);
+        }
+    }
+
+    #[test]
+    fn preprocess_skips_alpha_and_stretches() {
+        // 2x1 RGBA frame (alpha must be ignored), stretched to 4x4
+        let frame = [200, 100, 50, 7, 200, 100, 50, 7];
+        let mut out = vec![0.0f32; 3 * 16];
+        preprocess_frame(&frame, 2, 1, 4, 4, None, &mut out);
+
+        for i in 0..16 {
+            assert!(close(out[i], 200.0 / 255.0));
+            assert!(close(out[16 + i], 100.0 / 255.0));
+            assert!(close(out[32 + i], 50.0 / 255.0));
+        }
+    }
+
+    #[test]
+    fn preprocess_blends_between_source_pixels() {
+        // Black and white pixel side by side, stretched to 4 wide
+        let frame = [0, 0, 0, 255, 255, 255];
+        let mut out = vec![0.0f32; 3 * 4];
+        preprocess_frame(&frame, 2, 1, 4, 1, None, &mut out);
+
+        let red = &out[0..4];
+        assert!(close(red[0], 0.0) && close(red[3], 1.0));
+        assert!(red[0] < red[1] && red[1] < red[2] && red[2] < red[3]);
+    }
+
+    #[test]
+    fn preprocess_zero_fills_on_short_frame_buffer() {
+        let mut out = vec![1.0f32; 3 * 4];
+        preprocess_frame(&[1, 2, 3], 2, 2, 2, 2, None, &mut out);
+        assert!(out.iter().all(|&v| v == 0.0));
+
+        let mut out = vec![1.0f32; 3 * 4];
+        preprocess_frame(&[], 0, 0, 2, 2, None, &mut out);
+        assert!(out.iter().all(|&v| v == 0.0));
+    }
+
+    /// Runs the real model on an image file. Needs the `camera` feature, an
+    /// exported model (auto-detected in `models/`, or `REACT_VISION_TEST_MODEL`)
+    /// and a PNG with at least one person in it:
+    ///
+    /// ```bash
+    /// REACT_VISION_TEST_IMAGE=/path/to/people.png \
+    ///   cargo test --features camera detector_finds_people_in_image -- --ignored --nocapture
+    /// ```
     #[cfg(feature = "camera")]
-    fn parse_yolov8_output(
-        &mut self,
-        data: &[f32],
-        threshold: f32,
-        frame_width: u32,
-        frame_height: u32,
-    ) -> Result<()> {
-        // Use the class count detected from the model's output shape
-        let num_classes = self.num_model_classes;
-        let num_predictions = 8400usize;
-
-        // Verify data size matches expected format
-        let expected_size = (4 + num_classes) * num_predictions;
-        if data.len() < expected_size {
-            // Fall back to inferring class count from data size
-            let inferred_classes = (data.len() / num_predictions).saturating_sub(4);
-            if inferred_classes == 0 {
-                return Ok(()); // Invalid data
-            }
-            if inferred_classes != num_classes {
-                log::warn!("[Detector] Data size suggests {} classes, but model reports {}",
-                    inferred_classes, num_classes);
-            }
-        }
-
-        for pred_idx in 0..num_predictions {
-            // Extract bbox (cx, cy, w, h) - transposed access
-            let cx = data[0 * num_predictions + pred_idx];
-            let cy = data[1 * num_predictions + pred_idx];
-            let w = data[2 * num_predictions + pred_idx];
-            let h = data[3 * num_predictions + pred_idx];
-
-            // Find max class score across all classes
-            let mut max_score = 0.0f32;
-            let mut max_class = 0usize;
-
-            for class_idx in 0..num_classes {
-                let score = data[(4 + class_idx) * num_predictions + pred_idx];
-                if score > max_score {
-                    max_score = score;
-                    max_class = class_idx;
-                }
-            }
-
-            // Keep ALL detections above threshold (not just person)
-            if max_score >= threshold {
-                // Convert from model coords to normalized frame coords
-                // Account for letterbox padding
-                let x1 = ((cx - w / 2.0) - self.pad_x as f32) / self.scale;
-                let y1 = ((cy - h / 2.0) - self.pad_y as f32) / self.scale;
-                let x2 = ((cx + w / 2.0) - self.pad_x as f32) / self.scale;
-                let y2 = ((cy + h / 2.0) - self.pad_y as f32) / self.scale;
-
-                // Normalize to 0-1 range
-                let norm_cx = (x1 + x2) / 2.0 / frame_width as f32;
-                let norm_cy = (y1 + y2) / 2.0 / frame_height as f32;
-                let norm_w = (x2 - x1) / frame_width as f32;
-                let norm_h = (y2 - y1) / frame_height as f32;
-
-                // Clamp to valid range
-                if norm_cx >= 0.0 && norm_cx <= 1.0 &&
-                   norm_cy >= 0.0 && norm_cy <= 1.0 &&
-                   norm_w > 0.01 && norm_h > 0.01 {
-                    // Get class name from loaded classes.json, or use generic fallback
-                    let class_name = match &self.class_names {
-                        Some(names) => names.get(max_class)
-                            .cloned()
-                            .unwrap_or_else(|| format!("class_{}", max_class)),
-                        None => format!("class_{}", max_class),
-                    };
-
-                    self.output_buffer.push(Detection::new(
-                        max_class,
-                        class_name,
-                        BBox::new(
-                            norm_cx.clamp(0.0, 1.0),
-                            norm_cy.clamp(0.0, 1.0),
-                            norm_w.clamp(0.01, 1.0),
-                            norm_h.clamp(0.01, 1.0),
-                        ),
-                        max_score,
-                    ));
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Preprocess frame to CHW normalized format with letterbox padding
-    fn preprocess_frame(&mut self, frame: &CameraFrame, target_w: u32, target_h: u32) {
-        let fw = frame.width as f32;
-        let fh = frame.height as f32;
-        let tw = target_w as f32;
-        let th = target_h as f32;
-
-        // Calculate letterbox scaling
-        self.scale = (tw / fw).min(th / fh);
-        let scaled_w = (fw * self.scale) as u32;
-        let scaled_h = (fh * self.scale) as u32;
-        self.pad_x = (target_w - scaled_w) / 2;
-        self.pad_y = (target_h - scaled_h) / 2;
-
-        // Initialize to gray padding (0.5 normalized)
-        self.input_buffer.fill(0.5);
-
-        let channels = if frame.data.len() == (frame.width * frame.height * 4) as usize {
-            4  // RGBA
-        } else {
-            3  // RGB
+    #[test]
+    #[ignore = "needs an exported model and REACT_VISION_TEST_IMAGE"]
+    fn detector_finds_people_in_image() {
+        let image_path = std::env::var("REACT_VISION_TEST_IMAGE")
+            .expect("set REACT_VISION_TEST_IMAGE to a PNG with people in it");
+        let rgb = image::open(&image_path).expect("failed to open test image").to_rgb8();
+        let frame = CameraFrame {
+            width: rgb.width(),
+            height: rgb.height(),
+            data: rgb.into_raw(),
+            frame_num: 1,
         };
 
-        let plane_size = (target_w * target_h) as usize;
+        let config = DetectorConfig::default()
+            .with_model_path(std::env::var("REACT_VISION_TEST_MODEL").ok().map(PathBuf::from));
+        let mut detector = Detector::with_config(config).expect("failed to load the detector");
 
-        // Nearest-neighbor resize + CHW conversion
-        for ty in 0..target_h {
-            for tx in 0..target_w {
-                // Map target coords to source coords
-                if tx >= self.pad_x && tx < self.pad_x + scaled_w &&
-                   ty >= self.pad_y && ty < self.pad_y + scaled_h {
-                    let sx = ((tx - self.pad_x) as f32 / self.scale) as u32;
-                    let sy = ((ty - self.pad_y) as f32 / self.scale) as u32;
-
-                    if sx < frame.width && sy < frame.height {
-                        let src_idx = ((sy * frame.width + sx) * channels as u32) as usize;
-
-                        if src_idx + 2 < frame.data.len() {
-                            let r = frame.data[src_idx] as f32 / 255.0;
-                            let g = frame.data[src_idx + 1] as f32 / 255.0;
-                            let b = frame.data[src_idx + 2] as f32 / 255.0;
-
-                            let pixel_idx = (ty * target_w + tx) as usize;
-
-                            self.input_buffer[pixel_idx] = r;                    // R plane
-                            self.input_buffer[plane_size + pixel_idx] = g;       // G plane
-                            self.input_buffer[2 * plane_size + pixel_idx] = b;   // B plane
-                        }
-                    }
-                }
-            }
+        let mut timings_ms = Vec::new();
+        let mut detections = Vec::new();
+        for _ in 0..25 {
+            let start = std::time::Instant::now();
+            detections = detector.detect(&frame, 0.5).expect("detection failed");
+            timings_ms.push(start.elapsed().as_secs_f64() * 1000.0);
         }
-    }
+        // Drop warm-up runs, report the median of the rest
+        let mut steady = timings_ms[5..].to_vec();
+        steady.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
-    /// Apply Non-Maximum Suppression
-    fn apply_nms(&mut self, iou_threshold: f32) {
-        if self.output_buffer.len() <= 1 {
-            return;
+        println!(
+            "{}x{} frame, {:?} model, input {:?}: {} detections, median {:.1} ms per frame \
+             (resize + inference + decode)",
+            frame.width, frame.height, detector.format(), detector.input_size(), detections.len(),
+            steady[steady.len() / 2]
+        );
+        for d in &detections {
+            println!(
+                "  {:<12} {:.2}  centre ({:.2}, {:.2})  size {:.2} x {:.2}",
+                d.class_name, d.score, d.bbox.x, d.bbox.y, d.bbox.w, d.bbox.h
+            );
         }
 
-        // Sort by score descending
-        self.output_buffer.sort_by(|a, b| {
-            b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
-        });
-
-        let mut keep = vec![true; self.output_buffer.len()];
-
-        for i in 0..self.output_buffer.len() {
-            if !keep[i] {
-                continue;
-            }
-
-            for j in (i + 1)..self.output_buffer.len() {
-                if !keep[j] {
-                    continue;
-                }
-
-                // Only suppress same-class detections
-                if self.output_buffer[i].class_id == self.output_buffer[j].class_id {
-                    let iou = self.output_buffer[i].bbox.iou(&self.output_buffer[j].bbox);
-                    if iou > iou_threshold {
-                        keep[j] = false;
-                    }
-                }
-            }
+        assert!(
+            detections.iter().any(|d| d.class_name.eq_ignore_ascii_case("person")),
+            "expected at least one person in {}", image_path
+        );
+        for d in &detections {
+            assert!(d.bbox.w > 0.0 && d.bbox.w <= 1.0 && d.bbox.h > 0.0 && d.bbox.h <= 1.0);
+            assert!((0.0..=1.0).contains(&d.bbox.x) && (0.0..=1.0).contains(&d.bbox.y));
         }
-
-        // Keep only non-suppressed detections
-        let mut write_idx = 0;
-        for read_idx in 0..self.output_buffer.len() {
-            if keep[read_idx] {
-                if write_idx != read_idx {
-                    self.output_buffer.swap(write_idx, read_idx);
-                }
-                write_idx += 1;
-            }
-        }
-        self.output_buffer.truncate(write_idx);
     }
 }

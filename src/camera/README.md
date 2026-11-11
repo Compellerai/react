@@ -11,7 +11,7 @@ V2: Cross-camera identity using embeddings + auto camera selection
 camera/
 ├── mod.rs              # Public API, CameraManager
 ├── capture.rs          # nokhwa webcam capture, frame ring buffers
-├── detector.rs         # ONNX inference (YOLOv8n person/face)
+├── detector.rs         # ONNX inference (RF-DETR, see models/README.md)
 ├── tracker.rs          # SORT-style per-camera tracking
 ├── state.rs            # Track, Detection, EntityState structs
 └── integration.rs      # Bridge to harmonic geometry (TOI → modulation)
