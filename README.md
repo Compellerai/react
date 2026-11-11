@@ -1,5 +1,7 @@
 # REACT by Compeller.ai
 
+https://compeller.ai/react
+
 **Real-time, audio-reactive visuals, lighting and streaming for live performance — built to empower musicians and venues.**
 
 [![Crates.io](https://img.shields.io/crates/v/compeller-react.svg)](https://crates.io/crates/compeller-react)
