@@ -203,6 +203,15 @@ codegen-units = 1
 lto = "thin"
 panic = "abort"
 
+# Build scripts and proc-macros only ever run on the build machine, so
+# stripping them saves nothing. It also breaks the build on current Xcode:
+# with MACOSX_DEPLOYMENT_TARGET set (build.sh sets it), a stripped proc-macro
+# library comes out with a string table macOS refuses to load ("mis-aligned
+# LINKEDIT string pool"), and every crate that uses the macro then fails with
+# "can't find crate".
+[profile.release.build-override]
+strip = false
+
 [profile.dev]
 incremental = true
 split-debuginfo = "unpacked"
