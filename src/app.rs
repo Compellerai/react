@@ -4429,7 +4429,7 @@ impl eframe::App for CompellerApp {
                             .color(egui::Color32::WHITE)
                     )
                     .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 60, 200))
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 100)))
+                    .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(80, 80, 100)))
                     .min_size(egui::vec2(28.0, 60.0));
 
                     if ui.add(button).on_hover_text(tooltip).clicked() {
@@ -6261,7 +6261,7 @@ impl eframe::App for CompellerApp {
                         .fill(egui::Color32::from_rgba_unmultiplied(10, 10, 20, 240))
                         .rounding(12.0)
                         .inner_margin(egui::Margin::symmetric(32.0, 24.0))
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(220, 38, 38)))  // Compeller red
+                        .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(220, 38, 38)))  // Compeller red
                         .show(ui, |ui| {
                             ui.set_min_width(280.0);
 

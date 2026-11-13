@@ -128,7 +128,7 @@ fn mac_traffic_lights(ui: &mut egui::Ui) -> TrafficLightAction {
 
     // Draw symbols on hover
     if hovered {
-        let dark_stroke = |r: u8, g: u8, b: u8| egui::Stroke::new(1.5, egui::Color32::from_rgb(r, g, b));
+        let dark_stroke = |r: u8, g: u8, b: u8| egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(r, g, b));
 
         // Red X
         let s = radius * 0.4;
@@ -6395,7 +6395,7 @@ impl ControlPanel {
                                     ui.painter().rect_stroke(
                                         rect.expand(1.0),
                                         3.0,
-                                        egui::Stroke::new(2.0, border_color),
+                                        egui::Stroke::new(2.0_f32, border_color),
                                     );
                                     ui.painter().image(
                                         texture.id(),
@@ -10133,7 +10133,7 @@ impl ControlPanel {
                                 } else {
                                     egui::Color32::from_rgb(60, 60, 65)
                                 };
-                                ui.painter().rect_stroke(thumb_rect, 6.0, egui::Stroke::new(2.0, border_color));
+                                ui.painter().rect_stroke(thumb_rect, 6.0, egui::Stroke::new(2.0_f32, border_color));
 
                                 // Name label (truncated at char boundary)
                                 let max_chars = 20;
@@ -10648,7 +10648,7 @@ impl ControlPanel {
                                         _ => egui::Color32::from_rgb(50, 50, 55),
                                     }
                                 };
-                                ui.painter().rect_stroke(thumb_rect, 4.0, egui::Stroke::new(1.0, border_color));
+                                ui.painter().rect_stroke(thumb_rect, 4.0, egui::Stroke::new(1.0_f32, border_color));
 
                                 // Name label (truncated at char boundary)
                                 let display_name = rec.display_name();
@@ -11200,7 +11200,7 @@ impl ControlPanel {
                                 } else {
                                     egui::Color32::from_rgb(255, 200, 100) // Yellow for others
                                 };
-                                let stroke_width = if is_active { 3.0 } else { 1.5 };
+                                let stroke_width = if is_active { 3.0 } else { 1.5_f32 };
 
                                 ui.painter().rect_stroke(box_rect, 0.0, egui::Stroke::new(stroke_width, color));
 
@@ -12654,7 +12654,7 @@ impl ControlPanel {
         } else {
             egui::Color32::from_rgb(50, 50, 55)
         };
-        ui.painter().rect_stroke(thumb_rect, 4.0, egui::Stroke::new(1.0, border_color));
+        ui.painter().rect_stroke(thumb_rect, 4.0, egui::Stroke::new(1.0_f32, border_color));
 
         // Name label (truncated at char boundary to avoid panics on multi-byte UTF-8)
         let max_chars = 18;
@@ -12889,7 +12889,7 @@ impl ControlPanel {
             Some(crate::db::SetUploadStatus::Failed) => egui::Color32::from_rgb(120, 50, 50),
             _ => egui::Color32::from_rgb(50, 50, 55),
         };
-        ui.painter().rect_stroke(thumb_rect, 4.0, egui::Stroke::new(1.0, border_color));
+        ui.painter().rect_stroke(thumb_rect, 4.0, egui::Stroke::new(1.0_f32, border_color));
 
         // Name label (truncated at char boundary)
         let display_name = rec.display_name();
@@ -13368,7 +13368,7 @@ impl ControlPanel {
             let painter = ui.painter_at(indicator_rect);
             let center = indicator_rect.center();
 
-            painter.circle_stroke(center, circle_radius + 1.0, egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 30, 30)));
+            painter.circle_stroke(center, circle_radius + 1.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(60, 30, 30)));
             let fill_color = if show_kick {
                 egui::Color32::from_rgb(255, 50, 50)
             } else {
@@ -13432,7 +13432,7 @@ impl ControlPanel {
                 // Baseline for silence
                 painter.line_segment(
                     [egui::pos2(rect.min.x, rect.max.y - 1.0), egui::pos2(rect.max.x, rect.max.y - 1.0)],
-                    egui::Stroke::new(1.0, baseline_color),
+                    egui::Stroke::new(1.0_f32, baseline_color),
                 );
 
                 // Filled level (using gain-adjusted value)
@@ -13452,7 +13452,7 @@ impl ControlPanel {
                 let peak_y = rect.max.y - (rect.height() * bass_peak);
                 painter.line_segment(
                     [egui::pos2(rect.min.x, peak_y), egui::pos2(rect.max.x, peak_y)],
-                    egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 200, 200)),
+                    egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(255, 200, 200)),
                 );
             });
 
@@ -13468,7 +13468,7 @@ impl ControlPanel {
                 painter.rect_filled(rect, 2.0, egui::Color32::from_rgb(30, 30, 40));
                 painter.line_segment(
                     [egui::pos2(rect.min.x, rect.max.y - 1.0), egui::pos2(rect.max.x, rect.max.y - 1.0)],
-                    egui::Stroke::new(1.0, baseline_color),
+                    egui::Stroke::new(1.0_f32, baseline_color),
                 );
 
                 let filled_height = rect.height() * mid;
@@ -13482,7 +13482,7 @@ impl ControlPanel {
                 let peak_y = rect.max.y - (rect.height() * mid_peak);
                 painter.line_segment(
                     [egui::pos2(rect.min.x, peak_y), egui::pos2(rect.max.x, peak_y)],
-                    egui::Stroke::new(2.0, egui::Color32::from_rgb(200, 255, 200)),
+                    egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(200, 255, 200)),
                 );
             });
 
@@ -13498,7 +13498,7 @@ impl ControlPanel {
                 painter.rect_filled(rect, 2.0, egui::Color32::from_rgb(30, 30, 40));
                 painter.line_segment(
                     [egui::pos2(rect.min.x, rect.max.y - 1.0), egui::pos2(rect.max.x, rect.max.y - 1.0)],
-                    egui::Stroke::new(1.0, baseline_color),
+                    egui::Stroke::new(1.0_f32, baseline_color),
                 );
 
                 let filled_height = rect.height() * high;
@@ -13512,7 +13512,7 @@ impl ControlPanel {
                 let peak_y = rect.max.y - (rect.height() * high_peak);
                 painter.line_segment(
                     [egui::pos2(rect.min.x, peak_y), egui::pos2(rect.max.x, peak_y)],
-                    egui::Stroke::new(2.0, egui::Color32::from_rgb(200, 200, 255)),
+                    egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(200, 200, 255)),
                 );
             });
 
@@ -13528,7 +13528,7 @@ impl ControlPanel {
                 painter.rect_filled(rect, 2.0, egui::Color32::from_rgb(30, 30, 40));
                 painter.line_segment(
                     [egui::pos2(rect.min.x, rect.max.y - 1.0), egui::pos2(rect.max.x, rect.max.y - 1.0)],
-                    egui::Stroke::new(1.0, baseline_color),
+                    egui::Stroke::new(1.0_f32, baseline_color),
                 );
 
                 let filled_height = rect.height() * rms;
@@ -13542,7 +13542,7 @@ impl ControlPanel {
                 let peak_y = rect.max.y - (rect.height() * peak);
                 painter.line_segment(
                     [egui::pos2(rect.min.x, peak_y), egui::pos2(rect.max.x, peak_y)],
-                    egui::Stroke::new(1.0, egui::Color32::from_rgb(220, 220, 220)),
+                    egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(220, 220, 220)),
                 );
             });
         });
@@ -13561,7 +13561,7 @@ impl ControlPanel {
             let center = indicator_rect.center();
 
             // Outer ring (subtle)
-            painter.circle_stroke(center, circle_radius + 1.0, egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 30, 30)));
+            painter.circle_stroke(center, circle_radius + 1.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(60, 30, 30)));
 
             // Filled circle
             let fill_color = if show_kick {
@@ -14232,7 +14232,7 @@ impl ControlPanel {
                         let threshold_x = sep_rect.min.x + sep_rect.width() * 0.20;
                         painter.line_segment(
                             [egui::pos2(threshold_x, sep_rect.min.y), egui::pos2(threshold_x, sep_rect.max.y)],
-                            egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 80)),
+                            egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(80, 80, 80)),
                         );
 
                         // Fill based on separation
@@ -14303,7 +14303,7 @@ impl ControlPanel {
                         let threshold_x = stab_rect.min.x + stab_rect.width() * 0.60;
                         painter.line_segment(
                             [egui::pos2(threshold_x, stab_rect.min.y), egui::pos2(threshold_x, stab_rect.max.y)],
-                            egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 80)),
+                            egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(80, 80, 80)),
                         );
 
                         let stab_width = stab_rect.width() * field_state.stability.min(1.0);
@@ -14373,7 +14373,7 @@ impl ControlPanel {
                                     painter.rect_stroke(
                                         rect.expand(1.0),
                                         2.0,
-                                        egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 255, 150)),
+                                        egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(100, 255, 150)),
                                     );
                                 }
 

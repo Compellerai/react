@@ -1162,7 +1162,7 @@ fn screen_control_panel(
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style())
                 .fill(Color32::from_rgb(16, 19, 27))
-                .stroke(Stroke::new(1.0, Color32::from_rgb(72, 98, 132)))
+                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(72, 98, 132)))
                 .inner_margin(egui::Margin::same(12.0))
                 .show(ui, |ui| {
                     ui.set_width(232.0);
@@ -1236,7 +1236,7 @@ fn fixture_control_panel(
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style())
                 .fill(Color32::from_rgb(16, 19, 27))
-                .stroke(Stroke::new(1.0, Color32::from_rgb(72, 98, 132)))
+                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(72, 98, 132)))
                 .inner_margin(egui::Margin::same(12.0))
                 .show(ui, |ui| {
                     ui.set_width(232.0);
@@ -1527,7 +1527,7 @@ fn truss_control_panel(ctx: &egui::Context, t: &mut Truss, anchor: Pos2) -> (boo
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style())
                 .fill(Color32::from_rgb(16, 19, 27))
-                .stroke(Stroke::new(1.0, Color32::from_rgb(72, 98, 132)))
+                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(72, 98, 132)))
                 .inner_margin(egui::Margin::same(12.0))
                 .show(ui, |ui| {
                     ui.set_width(232.0);
@@ -1834,16 +1834,16 @@ fn draw_aim_handle(
     } else {
         Color32::from_rgb(120, 200, 240)
     };
-    p.line_segment([head, h], Stroke::new(1.0, tint(col, 0.5)));
-    p.circle_stroke(h, 8.0, Stroke::new(2.0, col));
+    p.line_segment([head, h], Stroke::new(1.0_f32, tint(col, 0.5)));
+    p.circle_stroke(h, 8.0, Stroke::new(2.0_f32, col));
     p.circle_filled(h, 3.0, col);
 }
 
 /// A bright ring marking the fixture whose control panel is open.
 fn draw_selection_ring(p: &egui::Painter, body: Pos2, s: f32) {
     let hi = Color32::from_rgb(120, 220, 255);
-    p.circle_stroke(body, s * 1.18, Stroke::new(2.0, hi));
-    p.circle_stroke(body, s * 1.18 + 3.5, Stroke::new(1.0, tint(hi, 0.35)));
+    p.circle_stroke(body, s * 1.18, Stroke::new(2.0_f32, hi));
+    p.circle_stroke(body, s * 1.18 + 3.5, Stroke::new(1.0_f32, tint(hi, 0.35)));
 }
 
 // ---------------------------------------------------------------------------
@@ -1870,7 +1870,7 @@ fn draw_floor(p: &egui::Painter, cam: &StageCamera, rect: Rect) {
     }
 
     // perspective grid
-    let grid = Stroke::new(1.0, Color32::from_rgb(30, 38, 52));
+    let grid = Stroke::new(1.0_f32, Color32::from_rgb(30, 38, 52));
     let mut y = y0;
     while y <= y1 + 0.001 {
         if let (Some(a), Some(b)) = (
@@ -1918,7 +1918,7 @@ fn draw_wedding_room(p: &egui::Painter, cam: &StageCamera, rect: Rect) {
     }
 
     // subtle warm perspective grid on the room floor
-    let grid = Stroke::new(1.0, Color32::from_rgb(48, 38, 33));
+    let grid = Stroke::new(1.0_f32, Color32::from_rgb(48, 38, 33));
     let mut y = y0;
     while y <= y1 + 0.001 {
         if let (Some(a), Some(b)) = (
@@ -1961,7 +1961,7 @@ fn draw_wall(p: &egui::Painter, cam: &StageCamera, rect: Rect, a: V3, b: V3, hei
         let top = Color32::from_rgb(14, 11, 16); // fades to dark near the ceiling
         p.add(grad_quad(corners, [base, base, top, top]));
         if let (Some(ta), Some(tb)) = (cam.screen(top_a, rect), cam.screen(top_b, rect)) {
-            p.line_segment([ta, tb], Stroke::new(1.0, Color32::from_rgb(70, 52, 48)));
+            p.line_segment([ta, tb], Stroke::new(1.0_f32, Color32::from_rgb(70, 52, 48)));
         }
     }
 }
@@ -1997,7 +1997,7 @@ fn draw_dance_floor(p: &egui::Painter, cam: &StageCamera, rect: Rect, x0: f32, x
     }
 
     // finer parquet grid inside the panel
-    let parquet = Stroke::new(1.0, Color32::from_rgb(96, 66, 38));
+    let parquet = Stroke::new(1.0_f32, Color32::from_rgb(96, 66, 38));
     let step = 1.25;
     let mut gx = x0;
     while gx <= x1 + 0.001 {
@@ -2024,7 +2024,7 @@ fn draw_dance_floor(p: &egui::Painter, cam: &StageCamera, rect: Rect, x0: f32, x
     p.add(Shape::convex_polygon(
         scr.to_vec(),
         Color32::TRANSPARENT,
-        Stroke::new(2.0, Color32::from_rgb(150, 110, 60)),
+        Stroke::new(2.0_f32, Color32::from_rgb(150, 110, 60)),
     ));
 }
 
@@ -2061,7 +2061,7 @@ fn draw_back_wall(
         p.add(Shape::convex_polygon(
             b.to_vec(),
             Color32::from_rgb(20, 22, 29),
-            Stroke::new(1.5, Color32::from_rgb(74, 100, 128)),
+            Stroke::new(1.5_f32, Color32::from_rgb(74, 100, 128)),
         ));
     }
     let Some(s) = scr else { return };
@@ -2108,7 +2108,7 @@ fn draw_back_wall(
         p.add(Shape::convex_polygon(
             s.to_vec(),
             Color32::TRANSPARENT,
-            Stroke::new(1.0, Color32::from_rgb(52, 70, 92)),
+            Stroke::new(1.0_f32, Color32::from_rgb(52, 70, 92)),
         ));
     } else {
         // Placeholder until the first live frame is captured.
@@ -2124,7 +2124,7 @@ fn draw_back_wall(
         p.add(Shape::convex_polygon(
             s.to_vec(),
             Color32::TRANSPARENT,
-            Stroke::new(1.0, Color32::from_rgb(52, 70, 92)),
+            Stroke::new(1.0_f32, Color32::from_rgb(52, 70, 92)),
         ));
         for i in 1..8 {
             let t = i as f32 / 8.0;
@@ -2132,7 +2132,7 @@ fn draw_back_wall(
             let b = lerp_pos(s[1], s[2], t);
             p.line_segment(
                 [a, b],
-                Stroke::new(1.0, Color32::from_rgba_unmultiplied(70, 100, 140, 22)),
+                Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(70, 100, 140, 22)),
             );
         }
         let c = centroid(&s);
@@ -2191,8 +2191,8 @@ fn draw_truss(
     let (a1, a2) = (a.sub(half), a.add(half));
     let (b1, b2) = (b.sub(half), b.add(half));
 
-    let chord = Stroke::new(2.0, Color32::from_rgb(82, 92, 110));
-    let web = Stroke::new(1.0, Color32::from_rgb(47, 54, 68));
+    let chord = Stroke::new(2.0_f32, Color32::from_rgb(82, 92, 110));
+    let web = Stroke::new(1.0_f32, Color32::from_rgb(47, 54, 68));
 
     // chord rails
     if let (Some(s1), Some(s2)) = (cam.screen(a1, rect), cam.screen(b1, rect)) {
@@ -2258,7 +2258,7 @@ fn draw_trusses(
             _ => continue,
         };
         if selected == Some(i) {
-            p.line_segment([sa, sb], Stroke::new(2.0, Color32::from_rgb(120, 220, 255)));
+            p.line_segment([sa, sb], Stroke::new(2.0_f32, Color32::from_rgb(120, 220, 255)));
         }
         if t.locked {
             let mid = lerp_pos(sa, sb, 0.5);
@@ -2503,7 +2503,7 @@ fn draw_fixture(
     let lit = dim > 0.03 || strobe_amt > 0.1 || macro_amt > 0;
     if !lit {
         p.circle_filled(body, s * 0.26, tint(color, 0.20));
-        p.circle_stroke(body, s * 0.34, Stroke::new(1.0, tint(color, 0.38)));
+        p.circle_stroke(body, s * 0.34, Stroke::new(1.0_f32, tint(color, 0.38)));
         if selected {
             draw_selection_ring(p, body, s);
         }
@@ -2640,7 +2640,7 @@ fn draw_fixture(
                 }
                 if landed > 0.01 {
                     p.add(soft_disc(t, r * 1.2, tint(color, (0.05 + dim * 0.20) * landed)));
-                    p.circle_stroke(t, r, Stroke::new(1.4, tint(color, (0.10 + dim * 0.60) * landed)));
+                    p.circle_stroke(t, r, Stroke::new(1.4_f32, tint(color, (0.10 + dim * 0.60) * landed)));
                     // gobo break-up: two crossed slits
                     let slot = st.map(|x| x.gobo_slot).unwrap_or(0) as f32;
                     // gobo_rotation spins the break-up pattern.
@@ -2648,7 +2648,7 @@ fn draw_fixture(
                     for k in 0..2 {
                         let a = ang + k as f32 * FRAC_PI_2;
                         let d = Vec2::angled(a) * r;
-                        p.line_segment([t - d, t + d], Stroke::new(1.2, tint(Color32::BLACK, 0.5 * landed)));
+                        p.line_segment([t - d, t + d], Stroke::new(1.2_f32, tint(Color32::BLACK, 0.5 * landed)));
                     }
                 }
             }
@@ -2679,13 +2679,13 @@ fn draw_fixture(
             let panel = Rect::from_center_size(body, Vec2::new(panel_w, panel_h));
             p.add(soft_disc(body, panel_w.max(panel_h) * 0.85, tint(color, 0.12 + dim * 0.30)));
             p.rect_filled(panel, 3.0, tint(color, 0.30 + dim * 0.55));
-            p.rect_stroke(panel, 3.0, Stroke::new(1.0, tint(Color32::WHITE, 0.42)));
+            p.rect_stroke(panel, 3.0, Stroke::new(1.0_f32, tint(Color32::WHITE, 0.42)));
             let cells = 4;
             for i in 1..cells {
                 let x = panel.left() + panel.width() * i as f32 / cells as f32;
-                p.line_segment([Pos2::new(x, panel.top()), Pos2::new(x, panel.bottom())], Stroke::new(0.7, tint(Color32::BLACK, 0.32)));
+                p.line_segment([Pos2::new(x, panel.top()), Pos2::new(x, panel.bottom())], Stroke::new(0.7_f32, tint(Color32::BLACK, 0.32)));
                 let y = panel.top() + panel.height() * i as f32 / cells as f32;
-                p.line_segment([Pos2::new(panel.left(), y), Pos2::new(panel.right(), y)], Stroke::new(0.7, tint(Color32::BLACK, 0.32)));
+                p.line_segment([Pos2::new(panel.left(), y), Pos2::new(panel.right(), y)], Stroke::new(0.7_f32, tint(Color32::BLACK, 0.32)));
             }
         }
         StageVisualKind::Strobe => {
@@ -2705,13 +2705,13 @@ fn draw_fixture(
                 } else {
                     // dark between flashes — this is what reads as a strobe
                     p.circle_filled(body, s * 0.3, tint(color, 0.22));
-                    p.circle_stroke(body, s * 0.4, Stroke::new(1.0, tint(color, 0.4)));
+                    p.circle_stroke(body, s * 0.4, Stroke::new(1.0_f32, tint(color, 0.4)));
                 }
             } else {
                 // Lit without strobe — e.g. a blinder boost. Steady white flood.
                 p.add(soft_disc(body, s * (1.8 + dim * 1.5), tint(color, 0.14 + dim * 0.4)));
                 p.circle_filled(body, s * 0.42, tint(color, 0.55 + dim * 0.45));
-                p.circle_stroke(body, s * 0.48, Stroke::new(1.0, Color32::from_rgb(120, 138, 168)));
+                p.circle_stroke(body, s * 0.48, Stroke::new(1.0_f32, Color32::from_rgb(120, 138, 168)));
             }
         }
     }
@@ -2870,7 +2870,7 @@ fn draw_screen_fixture(
     p.add(Shape::convex_polygon(
         scr.to_vec(),
         Color32::TRANSPARENT,
-        Stroke::new(2.0, bezel),
+        Stroke::new(2.0_f32, bezel),
     ));
 
     if selected {
@@ -3042,7 +3042,7 @@ fn draw_segment_bar(
         } else {
             // dark cell — faint housing dot so the bar stays visible unlit
             p.circle_filled(*c, cell_r * 0.7, Color32::from_rgb(20, 24, 32));
-            p.circle_stroke(*c, cell_r * 0.8, Stroke::new(1.0, Color32::from_rgb(50, 60, 78)));
+            p.circle_stroke(*c, cell_r * 0.8, Stroke::new(1.0_f32, Color32::from_rgb(50, 60, 78)));
         }
     }
 
@@ -3185,11 +3185,11 @@ fn draw_segment_panel(
     // mounting yoke / housing frame, giving the panel visible depth.
     let chassis = panel.expand2(Vec2::new(panel_w * 0.04, panel_h * 0.12));
     p.rect_filled(chassis, 4.0, Color32::from_rgb(10, 12, 16));
-    p.rect_stroke(chassis, 4.0, Stroke::new(1.2, Color32::from_rgb(70, 80, 100)));
+    p.rect_stroke(chassis, 4.0, Stroke::new(1.2_f32, Color32::from_rgb(70, 80, 100)));
 
     // Lens area: dark backing, then the LED dot matrix.
     p.rect_filled(panel, 3.0, Color32::from_rgb(10, 12, 18));
-    p.rect_stroke(panel, 3.0, Stroke::new(1.0, Color32::from_rgb(55, 65, 85)));
+    p.rect_stroke(panel, 3.0, Stroke::new(1.0_f32, Color32::from_rgb(55, 65, 85)));
 
     // Each segment is subdivided into sub_w × sub_h LED dots. The dots are
     // sized so the matrix fills the lens with a small bezel gap between
@@ -3291,7 +3291,7 @@ fn draw_fixture_label(p: &egui::Painter, pos: Pos2, label: &str, show: bool) {
     let width = label.len() as f32 * 5.8 + 10.0;
     let rect = Rect::from_min_size(pos + Vec2::new(-4.0, -14.0), Vec2::new(width, 16.0));
     p.rect_filled(rect, 3.0, Color32::from_rgba_unmultiplied(4, 8, 14, 190));
-    p.rect_stroke(rect, 3.0, Stroke::new(1.0, Color32::from_rgba_unmultiplied(90, 120, 160, 130)));
+    p.rect_stroke(rect, 3.0, Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(90, 120, 160, 130)));
     p.text(
         pos,
         egui::Align2::LEFT_BOTTOM,
