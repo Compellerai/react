@@ -198,7 +198,7 @@ cocoa = "0.26"
 core-graphics = "0.24"
 gl = "0.14"
 glutin = "0.32"
-winit = "0.29"
+winit = "0.30"  # must match eframe 0.29; winit 0.29 pulls objc2 0.4.1, which no longer compiles on current rustc
 raw-window-handle = "0.6"
 # Modern Objective-C bindings (aligned with eframe/winit's version)
 objc2 = "0.5"

@@ -970,6 +970,38 @@ raw_energy    - Pre-normalization energy for silence detection
   repository. Place it at `./ndi-sdk` so that `ndi-sdk/lib/libndi.dylib` exists,
   or point `NDI_SDK_DIR` at your copy. Without it, NDI output is unavailable.
 
+### Quick setup (fresh Mac)
+
+```bash
+# 1. Xcode command line tools (compilers, git)
+xcode-select --install
+
+# 2. Native dependencies via Homebrew
+brew install cmake pkg-config ffmpeg gstreamer
+
+# 3. Rust via rustup (not `brew install rust`; rust-toolchain.toml picks the channel)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+
+# 4. Clone and run
+git clone https://github.com/Compellerai/react.git
+cd react
+cp .env.example .env.local   # then fill in the API host
+./start-react.sh
+```
+
+The first `./start-react.sh` compiles the whole crate tree in release mode, so
+expect it to take a while. Later runs are incremental.
+
+Two warnings at startup are expected on a fresh machine and do not stop the app:
+
+- `NDI SDK not found` — NDI output is disabled until the SDK is at `./ndi-sdk`.
+- `Vision model not found` — camera tracking is disabled until the model is in
+  `models/` (see `models/README.md`).
+
+If `start-react.sh` prints `cargo: command not found`, Rust is not installed or
+`~/.cargo/bin` is not on `PATH`: redo step 3 and open a new shell.
+
 ### Development
 
 ```bash
