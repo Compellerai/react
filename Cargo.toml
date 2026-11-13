@@ -167,7 +167,7 @@ foreign-types-shared = "0.1"
 llama_cpp = "0.3"
 
 # FFmpeg bindings for muxing and encoding
-ffmpeg-next = "8.1"
+ffmpeg-next = "9.1"
 
 # GStreamer for real-time A/V muxing (industry standard)
 gstreamer = "0.24"
