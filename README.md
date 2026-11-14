@@ -17,6 +17,7 @@ Requires macOS 12 or later (developed and tested on Apple Silicon), the Xcode
 Command Line Tools, [Rust](https://rustup.rs) and [Homebrew](https://brew.sh).
 
 ```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
 brew install cmake pkg-config ffmpeg gstreamer
 git clone https://github.com/Compellerai/react.git
 cd react
