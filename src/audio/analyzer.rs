@@ -233,6 +233,8 @@ pub struct AudioAnalyzer {
 
     // Time tracking
     sample_count: u64,
+    /// Audio seconds received since the last full analysis.
+    pending_audio_s: f32,
 
     // BPM tracking
     estimated_bpm: f32,
@@ -311,6 +313,7 @@ impl AudioAnalyzer {
             click_cooldown: 0,
             magnitude_buffer: vec![0.0; FFT_SIZE / 2],
             sample_count: 0,
+            pending_audio_s: 0.0,
             estimated_bpm: DEFAULT_BPM,
             beat_period_ms,
             beat_anchor_ms: 0.0,
@@ -565,6 +568,13 @@ impl AudioAnalyzer {
     pub fn analyze(&mut self, samples: &[f32]) -> AudioAnalysis {
         // Accumulate incoming samples
         self.sample_buffer.extend_from_slice(samples);
+        // Real audio time since the last call. The capture hands over
+        // interleaved stereo, and this runs once per UI frame on an overlapped
+        // window, so a call is ~17 ms of audio, not the 170 ms block the
+        // `dt_s` below assumes. Only the energy normalizer runs on real time
+        // so far: the kick detector's thresholds were tuned against the block
+        // clock and are left on it.
+        self.pending_audio_s += samples.len() as f32 / (2.0 * SAMPLE_RATE);
 
         // Keep buffer tight - only keep exactly what we need for FFT
         // This ensures we respond immediately to silence
@@ -647,7 +657,8 @@ impl AudioAnalyzer {
         // Old code used fixed multipliers (bass×300, mid×1200, high×12000) that
         // clipped everything to 1.0 — killing all contrast for lighting.
         // New code: percentile-based normalization with anti-clip headroom.
-        let norm = self.normalizer.normalize(bass_raw, mid_raw, high_raw, rms);
+        let audio_dt_s = std::mem::take(&mut self.pending_audio_s);
+        let norm = self.normalizer.normalize_dt(bass_raw, mid_raw, high_raw, rms, audio_dt_s);
 
         let bass_target = norm.bass;
         let mid_target = norm.mid;

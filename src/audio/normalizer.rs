@@ -41,6 +41,20 @@ const WARMUP_ALPHA_MULT: f32 = 10.0;
 /// Frames before warmup ends (~30 frames at ~5.9Hz ≈ 5 seconds)
 const WARMUP_FRAMES: u32 = 30;
 
+/// The FFT block every per-frame rate here was designed against: one
+/// 8192-sample window at 48 kHz. The analyzer actually runs once per UI frame
+/// on an overlapped window, so `normalize_dt` rescales each rate to the real
+/// time between calls (the time constants above are in this block's frames).
+pub const BLOCK_DT_S: f32 = 8192.0 / 48_000.0;
+
+/// Warmup length in seconds (`WARMUP_FRAMES` blocks).
+const WARMUP_S: f32 = WARMUP_FRAMES as f32 * BLOCK_DT_S;
+
+/// A per-block EMA rate `a`, applied over `dt_s` seconds instead of one block.
+fn rate_over(a: f32, dt_s: f32) -> f32 {
+    1.0 - (1.0 - a.clamp(0.0, 1.0)).powf(dt_s / BLOCK_DT_S)
+}
+
 /// Asymmetric ratio for percentile tracking.
 /// p10 moves fast downward (toward lower values), slow upward.
 /// p90 moves fast upward (toward higher values), slow downward.
@@ -102,6 +116,8 @@ pub struct ControlSignalNormalizer {
     floor_ratio: [f32; NUM_SIGNALS],
     /// Frames processed (for warmup logic)
     frames_seen: u32,
+    /// Seconds of audio processed (warmup runs on time, not call count)
+    elapsed_s: f32,
     /// Whether first frame has been seen (for initialization)
     initialized: bool,
     /// Warmup blend factor: 0.0 at start, ramps to 1.0 over WARMUP_FRAMES
@@ -117,6 +133,7 @@ impl ControlSignalNormalizer {
             clip_ratio: [0.0; NUM_SIGNALS],
             floor_ratio: [0.0; NUM_SIGNALS],
             frames_seen: 0,
+            elapsed_s: 0.0,
             initialized: false,
             warmup_phase: 0.0,
         }
@@ -139,14 +156,27 @@ impl ControlSignalNormalizer {
         high_raw: f32,
         rms: f32,
     ) -> NormalizedSignals {
-        self.frames_seen += 1;
+        self.normalize_dt(bass_raw, mid_raw, high_raw, rms, BLOCK_DT_S)
+    }
 
-        // Ramp warmup_phase from 0→1 over WARMUP_FRAMES
-        if self.frames_seen <= WARMUP_FRAMES {
-            self.warmup_phase = self.frames_seen as f32 / WARMUP_FRAMES as f32;
-        } else {
-            self.warmup_phase = 1.0;
-        }
+    /// [`normalize`](Self::normalize) for a call that comes `dt_s` seconds
+    /// after the previous one. Every adaptation rate is per FFT block
+    /// (`BLOCK_DT_S`); called more often than that, each step is scaled down
+    /// so the time constants hold in seconds whatever the call rate.
+    pub fn normalize_dt(
+        &mut self,
+        bass_raw: f32,
+        mid_raw: f32,
+        high_raw: f32,
+        rms: f32,
+        dt_s: f32,
+    ) -> NormalizedSignals {
+        let dt_s = dt_s.clamp(1e-4, 1.0);
+        self.frames_seen = self.frames_seen.saturating_add(1);
+        self.elapsed_s += dt_s;
+
+        // Ramp warmup_phase from 0→1 over the warmup time
+        self.warmup_phase = (self.elapsed_s / WARMUP_S).min(1.0);
 
         // Step 1: Convert to log domain for better dynamic range
         let log_vals = [
@@ -186,7 +216,7 @@ impl ControlSignalNormalizer {
             // Without this, a 2-second pause would drop p10 so far that the
             // next sound maps to full scale.
             ADAPT_ALPHA * SILENCE_ALPHA_MULT
-        } else if self.frames_seen < WARMUP_FRAMES {
+        } else if self.elapsed_s < WARMUP_S {
             ADAPT_ALPHA * WARMUP_ALPHA_MULT
         } else {
             ADAPT_ALPHA
@@ -197,17 +227,18 @@ impl ControlSignalNormalizer {
             let x = log_vals[i];
 
             // p10: fast downward, slow upward (tracks low end)
+            let (fast, slow) = (rate_over(alpha * ASYM_FAST, dt_s), rate_over(alpha * ASYM_SLOW, dt_s));
             if x < self.p10[i] {
-                self.p10[i] += alpha * ASYM_FAST * (x - self.p10[i]);
+                self.p10[i] += fast * (x - self.p10[i]);
             } else {
-                self.p10[i] += alpha * ASYM_SLOW * (x - self.p10[i]);
+                self.p10[i] += slow * (x - self.p10[i]);
             }
 
             // p90: fast upward, slow downward (tracks high end)
             if x > self.p90[i] {
-                self.p90[i] += alpha * ASYM_FAST * (x - self.p90[i]);
+                self.p90[i] += fast * (x - self.p90[i]);
             } else {
-                self.p90[i] += alpha * ASYM_SLOW * (x - self.p90[i]);
+                self.p90[i] += slow * (x - self.p90[i]);
             }
 
             // Note: we no longer force p90 upward here. Instead, Step 5
@@ -230,17 +261,19 @@ impl ControlSignalNormalizer {
             normed[i] = ((log_vals[i] - effective_low) / effective_range).clamp(0.0, 1.0);
 
             // Step 6: Anti-clip headroom adjustment
+            let ratio_rate = rate_over(RATIO_ALPHA, dt_s);
             let is_clipped = if normed[i] >= 0.99 { 1.0f32 } else { 0.0 };
-            self.clip_ratio[i] += RATIO_ALPHA * (is_clipped - self.clip_ratio[i]);
+            self.clip_ratio[i] += ratio_rate * (is_clipped - self.clip_ratio[i]);
 
             let is_floored = if normed[i] <= 0.01 { 1.0f32 } else { 0.0 };
-            self.floor_ratio[i] += RATIO_ALPHA * (is_floored - self.floor_ratio[i]);
+            self.floor_ratio[i] += ratio_rate * (is_floored - self.floor_ratio[i]);
 
+            let blocks = dt_s / BLOCK_DT_S;
             if self.clip_ratio[i] > CLIP_RATIO_THRESH {
-                self.headroom[i] *= HEADROOM_EXPAND;
+                self.headroom[i] *= HEADROOM_EXPAND.powf(blocks);
             } else {
                 // Slowly contract back toward 1.0
-                self.headroom[i] = 1.0 + (self.headroom[i] - 1.0) * HEADROOM_CONTRACT;
+                self.headroom[i] = 1.0 + (self.headroom[i] - 1.0) * HEADROOM_CONTRACT.powf(blocks);
             }
             self.headroom[i] = self.headroom[i].clamp(1.0, HEADROOM_MAX);
         }
@@ -467,5 +500,43 @@ mod tests {
             "Warmup didn't cap energy on first frame: {:.3}",
             sig.energy_raw
         );
+    }
+
+    /// A song: 30 s loud, 30 s quiet breakdown, played to the normalizer at
+    /// `calls_per_s`. Returns the energy at the end of each passage.
+    fn loud_then_quiet(calls_per_s: f32) -> (f32, f32) {
+        let mut norm = ControlSignalNormalizer::new();
+        let dt = 1.0 / calls_per_s;
+        let mut loud = 0.0;
+        for i in 0..(30.0 * calls_per_s) as usize {
+            let w = 0.9 + 0.2 * ((i as f32 * 0.37).sin() * 0.5 + 0.5);
+            loud = norm.normalize_dt(0.01 * w, 0.003 * w, 0.0004 * w, 0.30 * w, dt).energy_raw;
+        }
+        let mut quiet = 0.0;
+        for i in 0..(30.0 * calls_per_s) as usize {
+            let w = 0.9 + 0.2 * ((i as f32 * 0.37).sin() * 0.5 + 0.5);
+            quiet = norm.normalize_dt(0.0008 * w, 0.0022 * w, 0.0001 * w, 0.11 * w, dt).energy_raw;
+        }
+        (loud, quiet)
+    }
+
+    #[test]
+    fn the_call_rate_does_not_change_the_time_constants() {
+        // One call per FFT block (the design rate) vs once per UI frame at
+        // 60 and 120 Hz: the same song must normalize the same.
+        let (loud6, quiet6) = loud_then_quiet(1.0 / BLOCK_DT_S);
+        for rate in [60.0, 120.0] {
+            let (loud, quiet) = loud_then_quiet(rate);
+            assert!((loud - loud6).abs() < 0.08, "{rate} Hz loud {loud:.3} vs {loud6:.3}");
+            assert!((quiet - quiet6).abs() < 0.08, "{rate} Hz quiet {quiet:.3} vs {quiet6:.3}");
+        }
+    }
+
+    #[test]
+    fn a_breakdown_still_reads_low_after_thirty_seconds() {
+        // At the UI frame rate the old per-call rates re-centred a breakdown
+        // on ~0.5 within seconds; on real time it stays well under the groove.
+        let (loud, quiet) = loud_then_quiet(60.0);
+        assert!(loud > 0.15 && quiet < loud * 0.5, "breakdown {quiet:.3} vs groove {loud:.3}");
     }
 }
