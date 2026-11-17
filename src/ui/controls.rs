@@ -3758,7 +3758,9 @@ impl ControlPanel {
                     }
                     ui.label(egui::RichText::new(format!("{:.0}%", uv_level * 100.0)).small().color(egui::Color32::GRAY));
                 });
-                // Reactivity — brightness floor, audio drive gain, macro sensitivity.
+                // Reactivity — contrast: how far the quiet passages sit below the
+                // peaks (which are full at any setting). Also the audio drive
+                // gain and macro sensitivity.
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(egui_phosphor::regular::GAUGE).size(14.0).color(egui::Color32::from_rgb(255, 180, 80)));
@@ -3767,6 +3769,10 @@ impl ControlPanel {
                     if ui.add(
                         egui::Slider::new(&mut reactivity, 0.0..=1.0)
                             .show_value(false)
+                    ).on_hover_text(
+                        "Contrast between quiet and loud. Low keeps the quiet passages lit; \
+                         high takes them close to dark. Drops and peaks are full either way \
+                         (Global Brightness is the master level).",
                     ).changed() {
                         let mut new_config = state.config.clone();
                         new_config.reactivity = reactivity;

@@ -4445,6 +4445,30 @@ mod profile_wire_tests {
     }
 
     #[test]
+    fn the_rig_spans_dark_to_full_across_a_song() {
+        // At the settings the app ships with (reactivity 0.5, Auto style),
+        // on the wire: the breakdown is dim, the groove is a full stage that
+        // still sits under the drop, and the drop reaches the top.
+        let stage = festival_stage();
+        let traces = range_traces(&stage, SHIPPING);
+        let named = |name: &str| {
+            let i = SONG.iter().position(|p| p.name.starts_with(name)).expect(name);
+            traces[i].p(0.5).2
+        };
+        let (intro, groove, breakdown) = (named("intro"), named("groove"), named("breakdown"));
+        let hit = &traces[SONG.len()];
+        let (hit_mid, hit_top) = (hit.p(0.5).2, hit.p(0.95).2);
+
+        assert!(breakdown < 0.15, "the breakdown is dim: {breakdown:.2}");
+        assert!(breakdown > 0.03, "but not blacked out: {breakdown:.2}");
+        assert!(intro > breakdown * 2.0 && intro < groove * 0.7, "drums alone sit between: {intro:.2}");
+        assert!(groove > 0.45, "the groove is a lit stage: {groove:.2}");
+        assert!(hit_mid > groove + 0.12, "the drop lands above the groove: {hit_mid:.2} vs {groove:.2}");
+        assert!(hit_top > 0.85, "and reaches the top: {hit_top:.2}");
+        assert!(hit_mid > breakdown * 6.0, "low to high is a wide span: {breakdown:.2} -> {hit_mid:.2}");
+    }
+
+    #[test]
     fn a_scene_holds_its_palette_and_never_cuts_the_wall() {
         let stage = festival_stage();
         let before = colour_report(&stage, false);

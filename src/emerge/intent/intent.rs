@@ -2645,6 +2645,21 @@ mod tests {
     }
 
     #[test]
+    fn reactivity_sets_the_contrast_and_leaves_the_peak_full() {
+        let at = |reactivity: f32, energy: f32, drop_impact: f32| {
+            open_level(&CueSnapshot { reactivity, energy, drop_impact, ..CueSnapshot::default() })
+        };
+        for r in [0.0, 0.2, 0.5, 1.0] {
+            assert!(at(r, 0.9, 0.0) > 0.98, "a peak is full at reactivity {r}");
+            assert!(at(r, 0.5, 0.8) > 0.98, "a drop is full at reactivity {r}");
+        }
+        // The same quiet moment sits lower the higher the reactivity.
+        assert!(at(0.2, 0.2, 0.0) > at(0.5, 0.2, 0.0) && at(0.5, 0.2, 0.0) > at(1.0, 0.2, 0.0));
+        // A groove sits visibly under the drop.
+        assert!(at(0.5, 0.5, 0.0) < 0.85);
+    }
+
+    #[test]
     fn dynamics_only_ever_takes_away() {
         let open = CueSnapshot::default();
         let settled = CueSnapshot { dynamics: 0.2, ..CueSnapshot::default() };

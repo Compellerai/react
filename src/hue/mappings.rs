@@ -973,3 +973,35 @@ fn enforce_perceptual_floor(zone: EnergyZone, rgb: (f32, f32, f32)) -> (f32, f32
 
     (r.clamp(0.0, 1.0), g.clamp(0.0, 1.0), b.clamp(0.0, 1.0))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A groove with the kick landing: mid zone, bass up.
+    fn groove() -> CueSnapshot {
+        CueSnapshot { zone: EnergyZone::Mid, energy: 0.55, bass: 0.75, ..CueSnapshot::default() }
+    }
+
+    #[test]
+    fn the_room_settles_in_a_breakdown_and_comes_back() {
+        // Adaptive energy drifts back to mid-scale inside a long breakdown;
+        // dynamics still says the low end is out, and the room stays down.
+        let full = compute_brightness(&groove(), false);
+        let breakdown = compute_brightness(&CueSnapshot { dynamics: 0.25, ..groove() }, false);
+        assert!(full > 0.4, "{full}");
+        assert!(breakdown < full * 0.5, "{breakdown} vs {full}");
+        assert!(breakdown > 0.05, "never off while music plays: {breakdown}");
+    }
+
+    #[test]
+    fn full_range_tension_lifts_the_room() {
+        // Raw tension tops out around 0.3 and never crossed the 0.5 the
+        // boost needs; on the song's own range it does.
+        let calm = CueSnapshot { tension: 0.1, ..groove() };
+        let mut tense = CueSnapshot { tension: 0.3, ..groove() };
+        assert_eq!(compute_brightness(&calm, false), compute_brightness(&tense, false));
+        tense.mood = crate::emerge::cue::Mood { tension: 1.0, tracked: true, ..Default::default() };
+        assert!(compute_brightness(&tense, false) > compute_brightness(&calm, false));
+    }
+}

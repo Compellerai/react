@@ -437,3 +437,27 @@ pub fn render_pulse(
     let pixel = to_u8(r * brightness, g * brightness, b * brightness);
     vec![pixel; led_count]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn level(snapshot: &CueSnapshot) -> f32 {
+        let bands = FrequencyBands { bass: 0.5, ..FrequencyBands::default() };
+        let (r, g, b) = render_pulse(snapshot, &bands, 1)[0];
+        r.max(g).max(b) as f32 / 255.0
+    }
+
+    #[test]
+    fn a_strip_settles_in_a_breakdown_and_fills_on_a_drop() {
+        let groove = CueSnapshot { zone: EnergyZone::Mid, energy: 0.55, ..CueSnapshot::default() };
+        let breakdown = CueSnapshot { dynamics: 0.25, ..groove.clone() };
+        let drop = CueSnapshot { drop_impact: 1.0, ..groove.clone() };
+        let (g, b, d) = (level(&groove), level(&breakdown), level(&drop));
+        assert!(b < g * 0.5, "breakdown {b} vs groove {g}");
+        // The drop drives the strip as hard as it goes: the same level as the
+        // loudest zone flat out (the palette colour sets the brightest channel).
+        let flat_out = level(&CueSnapshot { zone: EnergyZone::High, energy: 1.0, ..groove.clone() });
+        assert!(d > g && (d - flat_out).abs() < 0.02, "drop {d} vs groove {g}, flat out {flat_out}");
+    }
+}
