@@ -4209,6 +4209,23 @@ mod profile_wire_tests {
         song: &[Passage],
         lead_in_s: f32,
         directed: bool,
+        each: impl FnMut(ShowFrame),
+    ) {
+        play_show_as(stage, song, lead_in_s, directed, None, each)
+    }
+
+    /// The operator's settings for a played show: `None` is the bench rig the
+    /// scene tests were written against (Energetic, reactivity 1.0, no style
+    /// ceiling); `Some((reactivity, style))` plays it the way the app ships,
+    /// with the style's brightness ceiling stamped as the engine does.
+    type Operator = Option<(f32, crate::emerge::LightingStyle)>;
+
+    fn play_show_as(
+        stage: &Stage,
+        song: &[Passage],
+        lead_in_s: f32,
+        directed: bool,
+        operator: Operator,
         mut each: impl FnMut(ShowFrame),
     ) {
         use crate::emerge::cue::lighting_cue::advance_auto_chase;
@@ -4217,7 +4234,7 @@ mod profile_wire_tests {
             [(0, 0.62), (0, 0.62), (5, 0.34), (5, 0.34), (0, 0.62), (7, 0.36), (7, 0.36)];
 
         let mut brain = ShowBrain::new();
-        brain.set_style(LightingStyle::Energetic);
+        brain.set_style(operator.map_or(LightingStyle::Energetic, |(_, style)| style));
         let mut movement = MovementDirector::new();
         let mut scenes = SceneDirector::new();
         let mut player = SongPlayer::new();
@@ -4233,6 +4250,10 @@ mod profile_wire_tests {
                 let frame = brain.tick(&cue, &metrics, &ClockInputs::default());
                 let beat = frame.clock.beat;
                 cue.dynamics = brain.dynamics();
+                if let Some((reactivity, _)) = operator {
+                    cue.reactivity = reactivity;
+                    cue.style_brightness_ceiling = brain.effective_style().brightness_ceiling();
+                }
                 cue.dominant_pc = if beat.rem_euclid(16.0) >= 14.0 { (centre + 7) % 12 } else { centre };
                 cue.major_smooth = major;
                 cue.tonnetz_strength = 0.5;
@@ -4334,6 +4355,85 @@ mod profile_wire_tests {
         });
         report.groove_held = groove_held as f32 / groove_frames.max(1) as f32;
         report
+    }
+
+    // ── Dynamic range: how dark the quiet is and how full the peak ─────────
+
+    /// The `q` quantile (0..1) of `xs`.
+    fn quantile(xs: &[f32], q: f32) -> f32 {
+        if xs.is_empty() {
+            return 0.0;
+        }
+        let mut v = xs.to_vec();
+        v.sort_by(|a, b| a.total_cmp(b));
+        v[((v.len() - 1) as f32 * q).round() as usize]
+    }
+
+    /// What one passage put on the wire, frame by frame after it settled:
+    /// the panel wall (mean over cells of each cell's brightest channel), the
+    /// beams (mean dimmer byte), and the two together.
+    #[derive(Default)]
+    struct RangeTrace {
+        wall: Vec<f32>,
+        beams: Vec<f32>,
+        rig: Vec<f32>,
+    }
+
+    impl RangeTrace {
+        fn p(&self, q: f32) -> (f32, f32, f32) {
+            (quantile(&self.wall, q), quantile(&self.beams, q), quantile(&self.rig, q))
+        }
+    }
+
+    /// Settle time left out of each passage's trace (its transition in).
+    const RANGE_SETTLE_S: f32 = 4.0;
+
+    fn range_traces(stage: &Stage, operator: Operator) -> Vec<RangeTrace> {
+        let mut traces: Vec<RangeTrace> = (0..SONG.len()).map(|_| RangeTrace::default()).collect();
+        play_show_as(stage, &SONG, 60.0, true, operator, |f| {
+            if f.into < RANGE_SETTLE_S {
+                return;
+            }
+            let cells = stage.cell_colours(f.dmx);
+            let wall = cells.iter().map(|c| c[0].max(c[1]).max(c[2])).sum::<f32>() / cells.len() as f32;
+            let beams = (0..stage.beams.len()).map(|i| stage.beam_light(f.dmx, i).0).sum::<f32>()
+                / stage.beams.len() as f32;
+            let t = &mut traces[f.passage];
+            t.wall.push(wall);
+            t.beams.push(beams);
+            t.rig.push(0.5 * (wall + beams));
+        });
+        traces
+    }
+
+    /// The app's defaults: reactivity 0.5 and Auto style.
+    const SHIPPING: Operator = Some((0.5, crate::emerge::LightingStyle::Auto));
+
+    /// `cargo test dynamic_range_report -- --ignored --nocapture`
+    #[test]
+    #[ignore = "prints the rig's dynamic range per passage; run by hand"]
+    fn dynamic_range_report() {
+        use crate::emerge::LightingStyle;
+        let stage = festival_stage();
+        for (label, operator) in [
+            ("SHIPPING DEFAULTS (reactivity 0.5, Auto)", SHIPPING),
+            ("reactivity 0.2, Auto", Some((0.2, LightingStyle::Auto))),
+            ("reactivity 1.0, Auto", Some((1.0, LightingStyle::Auto))),
+            ("BENCH (reactivity 1.0, Energetic, no ceiling)", None),
+        ] {
+            println!("\n{label}");
+            println!(
+                "{:<26} {:>17} {:>17} {:>17}",
+                "passage", "wall p5/50/95", "beams p5/50/95", "rig p5/50/95"
+            );
+            for (p, t) in SONG.iter().zip(range_traces(&stage, operator)) {
+                let (lo, mid, hi) = (t.p(0.05), t.p(0.5), t.p(0.95));
+                println!(
+                    "{:<26} {:>5.2} {:>5.2} {:>5.2} {:>5.2} {:>5.2} {:>5.2} {:>5.2} {:>5.2} {:>5.2}",
+                    p.name, lo.0, mid.0, hi.0, lo.1, mid.1, hi.1, lo.2, mid.2, hi.2
+                );
+            }
+        }
     }
 
     #[test]
