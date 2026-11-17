@@ -13,6 +13,7 @@ pub(crate) mod cue_engine;
 pub(crate) mod dynamics;
 pub(crate) mod lighting_cue;
 pub(crate) mod lighting_cue_worker;
+pub(crate) mod range;
 pub(crate) mod show_brain;
 pub(crate) mod triggers;
 
@@ -22,6 +23,7 @@ pub use lighting_cue::{
     STOP_FADE_SECS,
 };
 pub use lighting_cue_worker::LightingCueWorker;
+pub use range::{contrast_shape, intensity, Mood, MoodTracker};
 pub use show_brain::{
     family_for, link_clock, prolink_clock, ClockInputs, ClockOverride, ShowBrain, ShowBrainFrame,
 };

@@ -285,6 +285,9 @@ pub struct CueEngine {
     balance_smooth: f32,
     tension_smooth: f32,
     stability_smooth: f32,
+    /// Tension / stability / valence / balance stretched over this song's
+    /// own range (`range.rs`), for consumers that want the full 0..1.
+    mood: super::range::MoodTracker,
     /// Slow per-track tension baseline (τ≈30 s) — see `tension_dyn`.
     tension_base: f32,
     /// ADAPTIVE tension: how far tension sits above its own slow baseline,
@@ -513,6 +516,7 @@ impl CueEngine {
             balance_smooth: 0.5,
             tension_smooth: 0.0,
             stability_smooth: 0.0,
+            mood: super::range::MoodTracker::new(),
             tension_base: 0.0,
             tension_dyn: 0.0,
             last_dt: 0.0,
@@ -646,6 +650,11 @@ impl CueEngine {
 
     pub fn stability_latch(&self) -> bool {
         self.stability_gate_open
+    }
+
+    /// The mood signals on their full range (see `range.rs`).
+    pub fn mood(&self) -> super::range::Mood {
+        self.mood.mood()
     }
 
     pub fn smoothed_metrics(&self) -> (f32, f32, f32, f32) {
@@ -888,6 +897,14 @@ impl CueEngine {
 
         // === REACTIVE FEATURES (early, for use by other layers) ===
         self.update_tonality(metrics, config);
+        self.mood.update(
+            self.energy_smooth,
+            self.tension_smooth,
+            self.stability_smooth,
+            self.major_smooth,
+            self.balance_smooth,
+            dt,
+        );
         self.update_energy_slope(metrics, config, &mut messages);
 
         // === MUSICAL ARC (before layers, gates downstream behavior) ===

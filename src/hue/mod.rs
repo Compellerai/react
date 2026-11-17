@@ -506,9 +506,25 @@ pub struct CueSnapshot {
     /// the rig's behaviour before this existed, so any path that does not
     /// stamp it is unchanged.
     pub dynamics: f32,
+    /// Tension, instability, valence, polarity strength and balance on this
+    /// song's own full 0..1 range (`emerge::cue::range`). The raw fields
+    /// above keep their analyzer scales for the consumers tuned to them.
+    pub mood: crate::emerge::cue::Mood,
 }
 
 impl CueSnapshot {
+    /// How big this moment is, 0..1: a breakdown near 0, a groove ~0.7, a
+    /// drop or a peak 1. See `emerge::cue::range::intensity`.
+    pub fn intensity(&self) -> f32 {
+        crate::emerge::cue::intensity(self.dynamics, self.energy, self.drop_impact)
+    }
+
+    /// `level` through the operator's reactivity, read as contrast: how far
+    /// below the peak the quiet moments sit. The peak is full at any setting.
+    pub fn contrast(&self, level: f32) -> f32 {
+        crate::emerge::cue::contrast_shape(level, self.reactivity)
+    }
+
     /// A manual operator override (BLINDER / STROBE / UV) is held. These are
     /// top-level overrides: they must fire WITH OR WITHOUT music and beat
     /// whatever the autonomous show is doing — so the silence gate (auto-dim in
@@ -627,6 +643,7 @@ impl CueSnapshot {
             // Stamped by the OSC thread; 1.0 = full license (classic behavior).
             intensity_license: 1.0,
             dynamics: 1.0,
+            mood: cue.mood(),
         }
     }
 }
@@ -718,6 +735,7 @@ impl Default for CueSnapshot {
             clock_confidence: 0.0,
             intensity_license: 1.0,
             dynamics: 1.0,
+            mood: crate::emerge::cue::Mood::default(),
         }
     }
 }
