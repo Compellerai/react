@@ -519,6 +519,31 @@ impl CueSnapshot {
         crate::emerge::cue::intensity(self.dynamics, self.energy, self.drop_impact)
     }
 
+    /// Tension on the song's own full range (raw `tension` where no mood
+    /// tracker has stamped the snapshot).
+    pub fn tension_full(&self) -> f32 {
+        if self.mood.tracked { self.mood.tension } else { self.tension.clamp(0.0, 1.0) }
+    }
+
+    /// How unsettled the harmony is, 0..1, on the song's own range.
+    pub fn instability_full(&self) -> f32 {
+        if self.mood.tracked { self.mood.instability } else { (1.0 - self.stability).clamp(0.0, 1.0) }
+    }
+
+    /// Major (1) / minor (0) lean on the song's own range; 0.5 is neutral.
+    pub fn valence_full(&self) -> f32 {
+        if self.mood.tracked { self.mood.valence } else { self.major_smooth.clamp(0.0, 1.0) }
+    }
+
+    /// How decisively the music leans major or minor, 0..1.
+    pub fn polarity_strength_full(&self) -> f32 {
+        if self.mood.tracked {
+            self.mood.polarity_strength
+        } else {
+            ((self.major_smooth - 0.5).abs() * 2.0).clamp(0.0, 1.0)
+        }
+    }
+
     /// `level` through the operator's reactivity, read as contrast: how far
     /// below the peak the quiet moments sit. The peak is full at any setting.
     pub fn contrast(&self, level: f32) -> f32 {

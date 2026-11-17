@@ -142,11 +142,22 @@ const BEAM_FADE: f32 = 0.35;
 const SETTLED_MOTION: f32 = 0.45;
 /// What is left of a polarity flip's pan throw when fully settled.
 const SETTLED_FLIP_THROW: f32 = 0.30;
+/// What is left of a flip's throw when the major/minor lean is ambiguous.
+const FLIP_THROW_AMBIGUOUS: f32 = 0.6;
+/// The movers' travel in a full-weight passage follows the size of the
+/// moment: this at the bottom of it, up to `MOTION_PEAK` on a drop or a peak.
+const MOTION_GROOVE_FLOOR: f32 = 0.8;
+const MOTION_PEAK: f32 = 1.15;
 
 /// Movement-depth multiplier (0.45..1.0) from dynamics — composes with the
 /// journey and coherence scales, so a settled passage sweeps a tighter arc.
 fn dynamics_motion_scale(snapshot: &CueSnapshot) -> f32 {
-    settle(SETTLED_MOTION, dynamics_lift(snapshot))
+    let drop = snapshot.drop_impact.clamp(0.0, 1.0) * dynamics_lift(snapshot);
+    let moment = crate::emerge::cue::intensity(1.0, snapshot.energy, drop);
+    // `moment` runs from the full-weight floor to 1.
+    let floor = crate::emerge::cue::intensity(1.0, 0.0, 0.0);
+    let t = ((moment - floor) / (1.0 - floor).max(1e-6)).clamp(0.0, 1.0);
+    settle(SETTLED_MOTION, dynamics_lift(snapshot)) * (MOTION_GROOVE_FLOOR + (MOTION_PEAK - MOTION_GROOVE_FLOOR) * t)
 }
 
 /// How lit beam group `ordinal` of `count` is at this `lift`. Groups come up
@@ -447,8 +458,10 @@ pub fn render_fixture_intent_placed(
         strobe: strobe_for_fixture(snapshot, fixture.role, fixture.visual_kind, osc),
         pan: pan_for_fixture(snapshot, fixture.role, fixture.visual_kind, osc, mover_ordinal, mover_count),
         tilt: tilt_for_fixture(snapshot, fixture.role, osc, mover_ordinal, mover_count, level_aim_deg),
-        zoom: 0.35 + snapshot.energy * 0.45,
-        focus: 0.45 + snapshot.stability * 0.35,
+        // The beam opens with the size of the moment and tightens as the
+        // tension fills; it softens as the harmony comes apart.
+        zoom: (0.25 + snapshot.intensity() * 0.60 - snapshot.tension_full() * 0.15).clamp(0.0, 1.0),
+        focus: 0.35 + (1.0 - snapshot.instability_full()) * 0.50,
         // Under a scene every wheel follows the director, which turns them
         // only while the beams are dark; otherwise they follow the pitch.
         color_wheel: match part {
@@ -998,7 +1011,7 @@ fn strobe_for_fixture(
     osc: &OscillatorFrameSnapshot,
 ) -> f32 {
     if strobe_hard_trigger(snapshot) {
-        return 0.35 + snapshot.tension * 0.65;
+        return 0.35 + snapshot.tension_full() * 0.65;
     }
 
     // COM-409A hardcoded demo rig binding: deck strobes pulse from a square
@@ -1014,7 +1027,7 @@ fn strobe_for_fixture(
             .with_ratio(1.0)
             .with_pulse_width(0.22),
         );
-        if pulse > 0.0 { 0.60 + snapshot.tension * 0.30 } else { 0.0 }
+        if pulse > 0.0 { 0.45 + snapshot.tension_full() * 0.50 } else { 0.0 }
     } else {
         0.0
     }
@@ -1060,7 +1073,10 @@ fn pan_for_fixture(
                     * snapshot.polarity_env
                     * THROW
                     * qc_accent_boost(snapshot)
-                    * settle(SETTLED_FLIP_THROW, dynamics_lift(snapshot));
+                    * settle(SETTLED_FLIP_THROW, dynamics_lift(snapshot))
+                    // A decisive lean throws the full distance; an ambiguous
+                    // one only leans.
+                    * (FLIP_THROW_AMBIGUOUS + (1.0 - FLIP_THROW_AMBIGUOUS) * snapshot.polarity_strength_full());
             // SCAN/CHASE crossfade on the intensity license: atonal walls
             // (post-rock, ambient) wander the lattice anchors, so chasing them
             // reads as "jumping all over" exactly when the music asks for a
@@ -1376,12 +1392,12 @@ fn color_for_fixture(
     // ambiguous harmony so the lattice anchor still reads as the key.
     // EALP B5 all-in: chord quality reinforces + extends the major/minor temperature
     // (adds dominant warmth/tension + diminished instability the continuous metric misses).
-    let temp = tonal_temperature(snapshot.major_smooth)
+    let temp = tonal_temperature(snapshot.valence_full())
         + chord_temperature(snapshot) * CHORD_TEMP_DEPTH;
     // Slice-2b dissonance bloom: a per-fixture hue fan that widens as harmonic
     // stability drops (the rig shatters into a chromatic spread on dissonance and
     // re-converges on the anchor as the harmony settles).
-    let fan = dissonance_fan(snapshot.stability, fixture_phase);
+    let fan = dissonance_fan(1.0 - snapshot.instability_full(), fixture_phase);
     let hue = (lattice_anchor + harmonic_bias + wash_rotation + look_offset
         + temp * TEMP_HUE_DEPTH + fan
         // EALP B5: a gentle harmonic-motion drift toward the Tonnetz fifths
@@ -1556,7 +1572,7 @@ fn scene_color(
     shade: &Shade,
     on_gel: bool,
 ) -> [f32; 4] {
-    let temp = tonal_temperature(snapshot.major_smooth)
+    let temp = tonal_temperature(snapshot.valence_full())
         + chord_temperature(snapshot) * CHORD_TEMP_DEPTH;
     let hue = if on_gel {
         shade.hue
@@ -1564,7 +1580,7 @@ fn scene_color(
         shade.hue
             + snapshot.balance * 0.06
             + temp * TEMP_HUE_DEPTH
-            + dissonance_fan(snapshot.stability, fixture_phase)
+            + dissonance_fan(1.0 - snapshot.instability_full(), fixture_phase)
             + tonnetz_drift(snapshot)
             + prl_hue_kick(snapshot)
             + chord_hue_kick(snapshot)
@@ -2654,7 +2670,11 @@ mod tests {
         // Lasers and strobes are not dimmed here: the show brain closes
         // their lanes outright in a low passage.
         assert_eq!(dynamics_dimmer_scale(&settled, StageVisualKind::Laser, 0, 3), 1.0);
-        assert_eq!(dynamics_motion_scale(&open), 1.0);
-        assert!((dynamics_motion_scale(&settled) - SETTLED_MOTION).abs() < 1e-6);
+        // Travel follows the size of the moment inside a full passage, and
+        // the settle still takes it down in a low one.
+        assert!((dynamics_motion_scale(&open) - MOTION_GROOVE_FLOOR).abs() < 1e-6);
+        let peak = CueSnapshot { energy: 1.0, ..CueSnapshot::default() };
+        assert!((dynamics_motion_scale(&peak) - MOTION_PEAK).abs() < 1e-6);
+        assert!((dynamics_motion_scale(&settled) - SETTLED_MOTION * MOTION_GROOVE_FLOOR).abs() < 1e-6);
     }
 }

@@ -1066,7 +1066,7 @@ const PEAK_PHRASE_BEATS: f64 = 16.0;
 /// Reading the section. The peak and the calm are each a running vote on the
 /// brain's arc, averaged over a few beats, with a gap between the level that
 /// enters a section and the level that leaves it.
-const PEAK_VOTE_BEATS: f32 = 8.0;
+const PEAK_VOTE_BEATS: f32 = 6.0;
 const PEAK_ENTER: f32 = 0.60;
 const PEAK_LEAVE: f32 = 0.25;
 const CALM_VOTE_BEATS: f32 = 4.0;
@@ -1087,7 +1087,7 @@ const DROP_MAX_BEATS: f32 = 32.0;
 /// Beats a section lasts before the votes may move it on: four bars of
 /// groove or peak, two of calm, so the music coming back is not kept waiting.
 /// (The build, the hold and the drop come when the music brings them.)
-const SECTION_MIN_BEATS: f32 = 16.0;
+const SECTION_MIN_BEATS: f32 = 12.0;
 const CALM_MIN_BEATS: f32 = 8.0;
 /// Beats a look stays before a change that can wait may replace it.
 const MIN_HOLD_BEATS: f32 = 4.0;

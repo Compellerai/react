@@ -32,11 +32,15 @@ pub struct Mood {
     pub polarity_strength: f32,
     /// Spectral balance, expanded.
     pub balance: f32,
+    /// False until a `MoodTracker` has stamped this. A snapshot built by hand
+    /// (a test, a fallback path) leaves it false, and the `CueSnapshot`
+    /// accessors then read the raw signals instead.
+    pub tracked: bool,
 }
 
 impl Default for Mood {
     fn default() -> Self {
-        Self { tension: 0.0, instability: 0.0, valence: 0.5, polarity_strength: 0.0, balance: 0.5 }
+        Self { tension: 0.0, instability: 0.0, valence: 0.5, polarity_strength: 0.0, balance: 0.5, tracked: false }
     }
 }
 
@@ -171,6 +175,7 @@ impl MoodTracker {
             let k = 1.0 - (-dt.max(0.0) / SILENT_TAU_S).exp();
             let rest = Mood::default();
             let m = &mut self.mood;
+            m.tracked = true;
             m.tension += (rest.tension - m.tension) * k;
             m.instability += (rest.instability - m.instability) * k;
             m.valence += (rest.valence - m.valence) * k;
@@ -185,6 +190,7 @@ impl MoodTracker {
             valence,
             polarity_strength: self.polarity.update((major - 0.5).abs() * 2.0, dt),
             balance: self.balance.update(balance, dt),
+            tracked: true,
         };
         self.mood
     }
