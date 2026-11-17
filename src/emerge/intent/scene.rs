@@ -87,10 +87,16 @@ pub struct Look {
     /// Extra bleach as the build's tension fills (0..1 at a full bank).
     pub tension_white: f32,
 
-    // Levels. Multipliers on what the music already gives each part.
+    // Levels. Multipliers on what the music already gives each part. The
+    // library is tiered so the section reads in the level as well as the
+    // look: a groove sits under a peak, a held breath far under both.
     pub body: f32,
     pub beams: f32,
     pub effects: f32,
+    /// How far under its level the colour body starts while the build's
+    /// tension is still empty (0..1); it climbs to the full level as the
+    /// bank fills, so a riser visibly rises.
+    pub rise: f32,
 
     // The chase: how the level is distributed over the stage and the bar.
     // Each depth is how far that pattern pulls a fixture down (0 = off).
@@ -110,6 +116,10 @@ pub struct Look {
     pub twinkle_white: f32,
     /// How much of the chase the beams join (0 = steady beams).
     pub beam_chase: f32,
+    /// The least of its level the chase leaves a fixture with (0 = it can go
+    /// dark between hits). A peak's chase punches over a lit stage instead of
+    /// taking half the light away at the moment the rig should be fullest.
+    pub chase_floor: f32,
 
     // The chase's shape.
     /// 0 = a broad swell, 1 = a narrow head with dark between.
@@ -137,6 +147,7 @@ impl Look {
         body: 1.0,
         beams: 1.0,
         effects: 1.0,
+        rise: 0.0,
         pulse: 0.0,
         wave: 0.0,
         burst: 0.0,
@@ -145,6 +156,7 @@ impl Look {
         field: 0.0,
         twinkle_white: 0.0,
         beam_chase: 0.0,
+        chase_floor: 0.0,
         sharp: 0.0,
         rate: 1.0,
         waves: 1.0,
@@ -261,8 +273,15 @@ const VOICES: BeamLook = BeamLook { white: false, voices: true, gobo: false, pri
 const WHITE: BeamLook = BeamLook { white: true, voices: false, gobo: false, prism: false };
 
 /// The library: each named look, written out.
+/// Where a groove's looks sit under a peak's (which are at 1.0).
+const GROOVE_LEVEL: f32 = 0.80;
+
 pub fn scene(kind: SceneKind) -> Scene {
     let p = Look::PLAIN;
+    // The groove tier: a full stage that still leaves the peak somewhere to go.
+    let g = Look { body: GROOVE_LEVEL, beams: GROOVE_LEVEL, effects: GROOVE_LEVEL, chase_floor: 0.30, ..p };
+    // The peak tier: everything, with a chase that punches over a lit stage.
+    let k = Look { chase_floor: 0.55, ..p };
     let (look, beam) = match kind {
         SceneKind::Ember => (Look { body: 0.7, beams: 0.6, effects: 0.5, ..p }, COLOUR),
         SceneKind::Dawn => (
@@ -310,18 +329,18 @@ pub fn scene(kind: SceneKind) -> Scene {
             },
             WHITE,
         ),
-        SceneKind::Duotone => (Look { split: 1.0, pulse: 0.30, beam_chase: 0.5, ..p }, VOICES),
+        SceneKind::Duotone => (Look { split: 1.0, pulse: 0.30, beam_chase: 0.5, ..g }, VOICES),
         SceneKind::Tide => (
-            Look { accent: TONE, spread: 0.12, wave: 0.55, beam_chase: 0.6, ..p },
+            Look { accent: TONE, spread: 0.12, wave: 0.55, beam_chase: 0.6, ..g },
             COLOUR,
         ),
         SceneKind::Lattice => (
-            Look { split: 0.6, field: 0.75, pulse: 0.15, ..p },
+            Look { split: 0.6, field: 0.75, pulse: 0.15, ..g },
             BeamLook { gobo: true, ..VOICES },
         ),
-        SceneKind::Pulse => (Look { pulse: 0.5, beam_chase: 0.4, ..p }, WHITE),
+        SceneKind::Pulse => (Look { pulse: 0.5, beam_chase: 0.4, ..g }, WHITE),
         SceneKind::Checker => (
-            Look { accent: TRITONE, split: 1.0, alternate: 0.65, beam_chase: 0.7, ..p },
+            Look { accent: TRITONE, split: 1.0, alternate: 0.65, beam_chase: 0.7, ..g },
             COLOUR,
         ),
         SceneKind::Undertow => (
@@ -334,7 +353,7 @@ pub fn scene(kind: SceneKind) -> Scene {
                 waves: 1.5,
                 dir: -1.0,
                 beam_chase: 0.5,
-                ..p
+                ..g
             },
             VOICES,
         ),
@@ -347,6 +366,7 @@ pub fn scene(kind: SceneKind) -> Scene {
                 accelerates: true,
                 beam_chase: 1.0,
                 effects: 0.6,
+                rise: 0.45,
                 ..p
             },
             WHITE,
@@ -355,8 +375,8 @@ pub fn scene(kind: SceneKind) -> Scene {
             Look {
                 saturation: 0.6,
                 white: 0.2,
-                body: 0.35,
-                beams: 0.6,
+                body: 0.25,
+                beams: 0.5,
                 effects: 0.0,
                 sparkle: 0.9,
                 twinkle_white: 1.0,
@@ -375,6 +395,7 @@ pub fn scene(kind: SceneKind) -> Scene {
                 rate: 2.0,
                 pulse: 0.25,
                 beam_chase: 0.5,
+                chase_floor: 0.80,
                 ..p
             },
             BeamLook { prism: true, ..WHITE },
@@ -387,7 +408,7 @@ pub fn scene(kind: SceneKind) -> Scene {
                 rate: 2.0,
                 pulse: 0.2,
                 beam_chase: 1.0,
-                ..p
+                ..k
             },
             WHITE,
         ),
@@ -400,12 +421,12 @@ pub fn scene(kind: SceneKind) -> Scene {
                 sparkle: 0.25,
                 twinkle_white: 1.0,
                 beam_chase: 1.0,
-                ..p
+                ..k
             },
             WHITE,
         ),
         SceneKind::Prism => (
-            Look { accent: TRIAD, split: 1.0, spread: 0.33, wave: 0.4, beam_chase: 0.6, ..p },
+            Look { accent: TRIAD, split: 1.0, spread: 0.33, wave: 0.4, beam_chase: 0.6, ..k },
             BeamLook { prism: true, ..VOICES },
         ),
         SceneKind::Stampede => (
@@ -417,7 +438,7 @@ pub fn scene(kind: SceneKind) -> Scene {
                 dir: -1.0,
                 pulse: 0.2,
                 beam_chase: 0.8,
-                ..p
+                ..k
             },
             WHITE,
         ),
@@ -854,6 +875,10 @@ const TWINKLE_STEPS_PER_BEAT: f64 = 2.0;
 /// The share of twinkling fixtures: a fixture is lit above this (0..1).
 const TWINKLE_LO: f32 = 0.55;
 const TWINKLE_HI: f32 = 0.90;
+/// How much of a chase's depth is left in the quietest moment (the rest
+/// comes in with the moment's intensity).
+const CHASE_QUIET_DEPTH: f32 = 0.5;
+
 /// Tension-bank band over which a riser bleaches and accelerates.
 const TENSION_LO: f32 = 0.25;
 const TENSION_HI: f32 = 0.65;
@@ -942,8 +967,10 @@ impl SceneFrame {
         seed: u32,
     ) -> Shade {
         let look = &scene.look;
-        // The chase rides the same gate as every oscillator: still in silence.
-        let live = osc.energy_env();
+        // The chase rides the same gate as every oscillator (still in
+        // silence), and digs deeper the bigger the moment: a breakdown
+        // breathes, a drop hits.
+        let live = osc.energy_env() * (CHASE_QUIET_DEPTH + (1.0 - CHASE_QUIET_DEPTH) * snapshot.intensity());
         let tension = smoothstep(TENSION_LO, TENSION_HI, snapshot.tension_bank);
         let riser = if look.accelerates { self.riser } else { 0.0 };
         let phase = (osc.cycle_phase(OscillatorInterval::Bar, look.rate, 0.0) + riser).fract();
@@ -981,6 +1008,8 @@ impl SceneFrame {
         if look.field > 0.0 {
             pull(look.field, field_cell(snapshot, x));
         }
+        let floor = look.chase_floor.clamp(0.0, 1.0);
+        let env = floor + (1.0 - floor) * env;
         // The beams join as much of the chase as the look gives them; effect
         // projectors hold steady.
         let chase = match part {
@@ -998,8 +1027,12 @@ impl SceneFrame {
         let white = look.white
             + look.tension_white * tension
             + look.twinkle_white * twinkle * look.sparkle.clamp(0.0, 1.0) * live;
+        let rise = match part {
+            Part::Body => 1.0 - look.rise.clamp(0.0, 1.0) * (1.0 - tension),
+            _ => 1.0,
+        };
         Shade {
-            level: (look.level(part) * chase).max(0.0),
+            level: (look.level(part) * rise * chase).max(0.0),
             hue: hue.rem_euclid(1.0),
             sat: look.saturation.clamp(0.0, 2.0),
             white: white.clamp(0.0, 1.0),
@@ -1086,7 +1119,7 @@ const SWAP_HOLD_SETTLED_S: f32 = 8.0;
 
 /// The drop's flash: how fast it falls away, and the shortest gap between two.
 const FLASH_TAU_S: f32 = 0.45;
-const FLASH_MIN_GAP_S: f32 = 4.0;
+const FLASH_MIN_GAP_S: f32 = 2.5;
 
 /// The beams' move-in-black. A colour or gobo wheel cannot fade, and takes a
 /// moment to travel, so the dimmer goes down, stays down while the wheels
@@ -2154,7 +2187,7 @@ mod tests {
             .map(|i| frame.shade(&s, &snapshot, &osc, Part::Body, -1.0 + i as f32 * 0.25, 0, 0).level)
             .collect();
         let (lo, hi) = levels.iter().fold((1.0f32, 0.0f32), |(lo, hi), &l| (lo.min(l), hi.max(l)));
-        assert!(hi > 0.95 && lo < 0.6, "{levels:?}");
+        assert!(hi > 0.95 * GROOVE_LEVEL && lo < 0.6, "{levels:?}");
     }
 
     #[test]

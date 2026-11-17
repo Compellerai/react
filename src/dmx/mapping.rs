@@ -835,7 +835,7 @@ pub(crate) fn apply_global_overrides(
     // laser at low slider positions.
     if !is_laser {
         // The operator master AND the style brightness ceiling (Banger 1.0 /
-        // Energetic 0.8 / Chill 0.5) both cap every emitter, so a calm style
+        // Energetic 0.92 / Chill 0.72) both cap every emitter, so a calm style
         // reads dimmer and a banger gets the full top end. A manual override
         // (blinder/strobe/UV) bypasses the autonomous ceiling — it beats
         // whatever the posture is doing — but still respects the operator master.
@@ -3945,6 +3945,9 @@ mod profile_wire_tests {
                 let frame = brain.tick(&cue, &metrics, &ClockInputs::default());
                 let mut cue = cue;
                 cue.dynamics = brain.dynamics();
+                // The shipping default. Reactivity is contrast, so 1.0 would
+                // be the deepest setting, not "unscaled".
+                cue.reactivity = 0.5;
                 cue.movement = director.tick(&cue, frame.arc_state, frame.clock.beat, frame.clock.tempo_bpm, DT);
                 let osc = OscillatorFrameSnapshot::from_clock(&cue, PhaseState::from_show_clock(frame.clock));
 
@@ -4387,18 +4390,22 @@ mod profile_wire_tests {
 
     /// Settle time left out of each passage's trace (its transition in).
     const RANGE_SETTLE_S: f32 = 4.0;
+    /// The drop's hit: its first seconds, after the flash has landed. Traced
+    /// on its own as the last entry (index `SONG.len()`).
+    const DROP_HIT_S: (f32, f32) = (0.5, 4.0);
 
     fn range_traces(stage: &Stage, operator: Operator) -> Vec<RangeTrace> {
-        let mut traces: Vec<RangeTrace> = (0..SONG.len()).map(|_| RangeTrace::default()).collect();
+        let mut traces: Vec<RangeTrace> = (0..=SONG.len()).map(|_| RangeTrace::default()).collect();
         play_show_as(stage, &SONG, 60.0, true, operator, |f| {
-            if f.into < RANGE_SETTLE_S {
+            let hit = SONG[f.passage].shape == Shape::Drop && f.into >= DROP_HIT_S.0 && f.into < DROP_HIT_S.1;
+            if f.into < RANGE_SETTLE_S && !hit {
                 return;
             }
             let cells = stage.cell_colours(f.dmx);
             let wall = cells.iter().map(|c| c[0].max(c[1]).max(c[2])).sum::<f32>() / cells.len() as f32;
             let beams = (0..stage.beams.len()).map(|i| stage.beam_light(f.dmx, i).0).sum::<f32>()
                 / stage.beams.len() as f32;
-            let t = &mut traces[f.passage];
+            let t = &mut traces[if hit { SONG.len() } else { f.passage }];
             t.wall.push(wall);
             t.beams.push(beams);
             t.rig.push(0.5 * (wall + beams));
@@ -4426,11 +4433,12 @@ mod profile_wire_tests {
                 "{:<26} {:>17} {:>17} {:>17}",
                 "passage", "wall p5/50/95", "beams p5/50/95", "rig p5/50/95"
             );
-            for (p, t) in SONG.iter().zip(range_traces(&stage, operator)) {
+            let names = SONG.iter().map(|p| p.name).chain(["THE DROP'S HIT (0.5-4 s)"]);
+            for (name, t) in names.zip(range_traces(&stage, operator)) {
                 let (lo, mid, hi) = (t.p(0.05), t.p(0.5), t.p(0.95));
                 println!(
                     "{:<26} {:>5.2} {:>5.2} {:>5.2} {:>5.2} {:>5.2} {:>5.2} {:>5.2} {:>5.2} {:>5.2}",
-                    p.name, lo.0, mid.0, hi.0, lo.1, mid.1, hi.1, lo.2, mid.2, hi.2
+                    name, lo.0, mid.0, hi.0, lo.1, mid.1, hi.1, lo.2, mid.2, hi.2
                 );
             }
         }

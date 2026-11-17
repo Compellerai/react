@@ -726,7 +726,7 @@ impl LightingEngine {
         // square wave at this Hz (UI "Strobe Rate" slider).
         cue_snap.strobe_rate_hz = self.manual_triggers.config.strobe_rate_hz;
         // Master brightness ceiling from the effective lighting style
-        // (Banger 1.0 / Energetic 0.8 / Chill 0.5) — caps every emitter.
+        // (Banger 1.0 / Energetic 0.92 / Chill 0.72) — caps every emitter.
         cue_snap.style_brightness_ceiling = li.effective_style.brightness_ceiling();
         // Style cap on the autopilot segment tension bank: the bank fills
         // license-independently (tension + energy slope), so Chill's measured

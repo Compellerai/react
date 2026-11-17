@@ -100,7 +100,7 @@ const DYNAMICS_OPEN: f32 = 0.90;
 const PUSH_LO: f32 = 0.15;
 const PUSH_HI: f32 = 0.85;
 /// Where a full-weight passage at low relative energy sits.
-const FULL_WEIGHT_FLOOR: f32 = 0.45;
+const FULL_WEIGHT_FLOOR: f32 = 0.55;
 /// How far a drop's impact lifts the moment.
 const DROP_LIFT: f32 = 0.45;
 
@@ -206,7 +206,7 @@ mod tests {
         let groove = intensity(1.0, 0.5, 0.0);
         let peak = intensity(1.0, 0.85, 0.0);
         let drop = intensity(1.0, 0.6, 0.77);
-        assert!(breakdown < 0.1, "{breakdown}");
+        assert!(breakdown < 0.12, "{breakdown}");
         assert!((0.6..0.8).contains(&groove), "{groove}");
         assert!(peak > 0.97 && drop > 0.97, "{peak} {drop}");
         // A drop called in a low passage is not a full-scale drop.

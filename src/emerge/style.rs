@@ -41,12 +41,15 @@ const BANGER_LICENSE_FLOOR: f32 = 0.85;
 const ENERGETIC_MOVEMENT_SCALE: f32 = 0.7;
 /// Chill blinder ban: under the 0.35 density gate in the blinder lane.
 const CHILL_DENSITY_CAP: f32 = 0.30;
-/// Brightness ceiling for Energetic — the loud-but-not-peak posture holds
-/// ~20% back so a banger drop still reads as a lift.
-const ENERGETIC_BRIGHTNESS_CEIL: f32 = 0.80;
-/// Brightness ceiling for Chill — calm material sits at half brightness so
-/// the rig reads as restrained, with plenty of headroom for the music to lift.
-const CHILL_BRIGHTNESS_CEIL: f32 = 0.50;
+/// Brightness ceiling for Energetic — a little held back from Banger. The
+/// lift into a drop now comes from the moment's own intensity (a groove sits
+/// around 0.7 of the rig, a drop at 1.0; see `cue::range::intensity`), so the
+/// ceiling no longer has to make that room by capping the top at 0.80.
+const ENERGETIC_BRIGHTNESS_CEIL: f32 = 0.92;
+/// Brightness ceiling for Chill — calm material reads restrained. Auto rests
+/// in Chill for most of a song, so at the old 0.50 the whole show ran at half
+/// brightness; 0.72 keeps the posture's character without halving the range.
+const CHILL_BRIGHTNESS_CEIL: f32 = 0.72;
 /// Chill cap on the autopilot segment tension bank. Mirrors
 /// `AUTO_SEG_TENSION_HIGH` in `lighting_cue.rs`: at or below it the segment
 /// look tops out at the measured Interference ripple and never enters the

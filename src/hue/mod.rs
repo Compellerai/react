@@ -311,7 +311,7 @@ pub struct CueSnapshot {
     /// square wave at this rate. Driven by the UI "Strobe Rate" slider.
     pub strobe_rate_hz: f32,
     /// Master brightness ceiling (0..1) from the EFFECTIVE lighting style
-    /// (Banger 1.0 / Energetic 0.8 / Chill 0.5). Caps every emitter so the rig
+    /// (Banger 1.0 / Energetic 0.92 / Chill 0.72). Caps every emitter so the rig
     /// reads dimmer in calm styles. 1.0 = no cap.
     pub style_brightness_ceiling: f32,
     pub blackout_active: bool,

@@ -123,19 +123,23 @@ fn journey_motion_scale(snapshot: &CueSnapshot) -> f32 {
 // takes away. Three things settle: how bright the colour body is, how many
 // beam groups are lit, and how far the heads travel.
 /// What is left of the colour body (panels, washes) when fully settled.
-const SETTLED_BODY: f32 = 0.30;
+const SETTLED_BODY: f32 = 0.42;
+/// A build climbs even while the low end is out: as the tension bank fills
+/// the colour body opens up to this much of its lift, whatever dynamics
+/// says, so the riser rises into the held breath before the drop.
+const BUILD_BODY_LIFT: f32 = 0.65;
+/// Tension-bank band over which a build opens the colour body.
+const BUILD_LIFT_BANK: (f32, f32) = (0.10, 0.50);
 /// What is left of the FIRST beam group when fully settled. The other groups
 /// go dark, and come back one at a time as the music fills in — a breakdown
 /// is a few slow beams, not the whole rig turned down.
-const SETTLED_BEAM: f32 = 0.40;
+const SETTLED_BEAM: f32 = 0.55;
 /// How far through the lift the LAST beam group starts to fade in...
 const BEAM_STAGGER: f32 = 0.75;
 /// ...and how much lift any one group takes to fade in fully.
 const BEAM_FADE: f32 = 0.35;
 /// What is left of the movers' travel when fully settled.
 const SETTLED_MOTION: f32 = 0.45;
-/// How much brighter the beams go on a drop (on top of their groove level).
-const BEAM_DROP_LIFT: f32 = 0.45;
 /// What is left of a polarity flip's pan throw when fully settled.
 const SETTLED_FLIP_THROW: f32 = 0.30;
 
@@ -171,10 +175,17 @@ fn dynamics_dimmer_scale(
     if lift >= 1.0 {
         return 1.0;
     }
+    // Through the operator's contrast, like the level it scales: the two
+    // multiply, so shaping each shapes the product.
     match visual_kind {
         StageVisualKind::Laser | StageVisualKind::Strobe => 1.0,
-        StageVisualKind::Beam | StageVisualKind::Gobo => beam_presence(lift, mover_ordinal, mover_count),
-        StageVisualKind::Wash | StageVisualKind::LedPanel => settle(SETTLED_BODY, lift),
+        StageVisualKind::Beam | StageVisualKind::Gobo => {
+            snapshot.contrast(beam_presence(lift, mover_ordinal, mover_count))
+        }
+        StageVisualKind::Wash | StageVisualKind::LedPanel => {
+            let build = BUILD_BODY_LIFT * smoothstep(BUILD_LIFT_BANK.0, BUILD_LIFT_BANK.1, snapshot.tension_bank);
+            snapshot.contrast(settle(SETTLED_BODY, lift.max(build)))
+        }
     }
 }
 
@@ -211,12 +222,6 @@ fn trust_motion(snapshot: &CueSnapshot) -> f32 {
 const QC_ACCENT_BOOST: f32 = 0.5; // up to +50% throw when the lattice is fully locked
 const QC_SAT_PUNCH: f32 = 0.4; // lattice lock-in lerps colour up to 40% toward full saturation
 
-// ── LED-panel brightness range (200W RGB body). Wide on purpose: dim in quiet,
-// full on a peak, so the bar reads diverse instead of "always bright". The
-// style ceiling caps the top per posture.
-const LED_PANEL_DIM_FLOOR: f32 = 0.30; // quiet-passage level (was a hard 0.74)
-const LED_PANEL_DIM_ENERGY: f32 = 0.60; // energy rides it up to full
-const LED_PANEL_DIM_PUMP: f32 = 0.12; // bass-pump punch on top
 
 // ── Segment-bar field brightness (segment_rgbw) — the field's intensity arc +
 // spatial structure dictate the bar's brightness. All tunable knobs.
@@ -687,33 +692,52 @@ fn smoothstep(lo: f32, hi: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
+/// How big the moment is for a rig at full weight, through the operator's
+/// reactivity (contrast): ~0.45 at the bottom of a full passage, ~0.75 in a
+/// groove, 1.0 on a drop or a peak. Every emitter's level hangs off this, so
+/// the groove sits visibly under the drop and the drop reaches the top.
+///
+/// Dynamics is NOT folded in here: the settle (`dynamics_dimmer_scale`) takes
+/// the low passages down afterwards, per fixture kind. The drop's lift is
+/// sized by dynamics so a "drop" called in a low passage stays small.
+fn open_level(snapshot: &CueSnapshot) -> f32 {
+    let drop = snapshot.drop_impact.clamp(0.0, 1.0) * dynamics_lift(snapshot);
+    snapshot.contrast(crate::emerge::cue::intensity(1.0, snapshot.energy, drop))
+}
+
+/// How much of a wash's level the bass pump moves: between kicks it sits this
+/// far under its level, and each kick punches it back to full.
+const WASH_PUMP_DEPTH: f32 = 0.18;
+/// The same for the LED panels.
+const LED_PANEL_PUMP_DEPTH: f32 = 0.12;
+/// How much of a beam's level rides the treble band.
+const BEAM_HIGH_DEPTH: f32 = 0.22;
+
 fn dimmer_for_fixture(
     snapshot: &CueSnapshot,
     role: FixtureRole,
     visual_kind: StageVisualKind,
     osc: &OscillatorFrameSnapshot,
 ) -> f32 {
+    let open = open_level(snapshot);
+    let pump = snapshot.bass_pump.clamp(0.0, 1.0);
     let base = match role {
-        FixtureRole::Wash => 0.18 + snapshot.energy * 0.62 + snapshot.bass_pump * 0.18,
+        FixtureRole::Wash => open * (1.0 - WASH_PUMP_DEPTH * (1.0 - pump)),
         FixtureRole::Accent => {
             // Flash accents are licensed: on atonal walls the dominant latch
             // wanders and its envelope re-fires constantly — blinking, not
             // accenting. (The latch's energy gate is honest now; this is the
             // taste layer on top.)
-            0.26 + snapshot.high * 0.30
+            open * (1.0 - BEAM_HIGH_DEPTH * (1.0 - snapshot.high.clamp(0.0, 1.0)))
                 + snapshot.dominant_env * 0.18 * snapshot.intensity_license.clamp(0.0, 1.0)
                 // A chord change breathes the accents up for a moment —
                 // licensed like the dominant flash, so an atonal wall whose
                 // "chords" are detector guesses doesn't blink.
                 + chord_accent(snapshot) * CHORD_DIMMER_BLOOM
                     * snapshot.intensity_license.clamp(0.0, 1.0)
-                // The drop is the one moment the beams go to full: they sit
-                // at a groove level otherwise, so without this a banger had
-                // no more beam than the verse before it. Rides the cue
-                // engine's drop impact, which holds while the energy stays up
-                // and then lets go; sized by dynamics so a "drop" called in a
-                // low passage stays small.
-                + snapshot.drop_impact.clamp(0.0, 1.0) * BEAM_DROP_LIFT * dynamics_lift(snapshot)
+            // The drop is the one moment the beams go to full: `open`
+            // carries the cue engine's drop impact, which holds while the
+            // energy stays up and then lets go.
         }
         FixtureRole::Strobe => 0.18 + snapshot.drop_impact * 0.22,
     };
@@ -725,9 +749,7 @@ fn dimmer_for_fixture(
     // (apply_global_overrides) caps the top per posture, and the Sine Bar +
     // `reactivity` master still shape it. Tunable knobs.
     let base = if matches!(visual_kind, StageVisualKind::LedPanel) {
-        LED_PANEL_DIM_FLOOR
-            + snapshot.energy * LED_PANEL_DIM_ENERGY
-            + snapshot.bass_pump * LED_PANEL_DIM_PUMP
+        open * (1.0 - LED_PANEL_PUMP_DEPTH * (1.0 - pump))
     } else {
         base
     };
@@ -761,8 +783,7 @@ fn dimmer_for_fixture(
         value = value.max(0.88);
     }
     // Slice-2 24/7 bed floor (Wash/Accent only): a floor only RAISES the minimum,
-    // so it settles quiet passages without ever capping a bright drop. Applied
-    // before the reactivity multiply so it scales with the operator master.
+    // so it settles quiet passages without ever capping a bright drop.
     if matches!(role, FixtureRole::Wash | FixtureRole::Accent) {
         value = value.max(bed_floor(snapshot.excitement));
     }
@@ -772,7 +793,9 @@ fn dimmer_for_fixture(
     if matches!(visual_kind, StageVisualKind::Beam) {
         value *= 1.0 - smoothstep(BEAM_TENSION_OFF_LOW, BEAM_TENSION_OFF_HIGH, snapshot.tension_bank);
     }
-    value * snapshot.reactivity.max(0.2)
+    // Reactivity is no longer a gain here: it is the contrast inside
+    // `open_level`, so the peak is full at any setting.
+    value.clamp(0.0, 1.0)
 }
 
 /// Which emergence flavour an effect fixture uses. The two flavours diverge ONLY in
@@ -920,8 +943,7 @@ fn galaxy_dimmer(snapshot: &CueSnapshot, osc: &OscillatorFrameSnapshot) -> f32 {
     // ~0.20 at saturated excitement) is what pinned the galaxies always-on, and this
     // presence gate floors them to ZERO instead, so they genuinely come and go.
     let presence = smoothstep(GALAXY_PRESENCE_LOW, GALAXY_PRESENCE_HIGH, snapshot.energy_slow);
-    let base = 0.26
-        + snapshot.high * 0.30
+    let base = open_level(snapshot) * (1.0 - BEAM_HIGH_DEPTH * (1.0 - snapshot.high.clamp(0.0, 1.0)))
         + snapshot.dominant_env * 0.18 * snapshot.intensity_license.clamp(0.0, 1.0);
     let breath = OscillatorBinding::new(OscillatorShape::Triangle, OscillatorInterval::Beat, 0.14)
         .with_ratio(0.5);
@@ -939,7 +961,7 @@ fn galaxy_dimmer(snapshot: &CueSnapshot, osc: &OscillatorFrameSnapshot) -> f32 {
     if snapshot.trigger_blinder || snapshot.auto_blinder_active {
         value = value.max(0.88);
     }
-    value * snapshot.reactivity.max(0.2)
+    value.clamp(0.0, 1.0)
 }
 
 /// Obsession (refined moonflower) dimmer — see `effect_dimmer`. An `energy_slow`
@@ -947,7 +969,8 @@ fn galaxy_dimmer(snapshot: &CueSnapshot, osc: &OscillatorFrameSnapshot) -> f32 {
 /// quiet) plus a peak-loudness band-pass; the drop slams it back, gated by presence so
 /// a drop in silence stays dark.
 fn moonflower_dimmer(snapshot: &CueSnapshot, osc: &OscillatorFrameSnapshot) -> f32 {
-    let base = 0.30 + snapshot.energy * 0.55 + snapshot.bass_pump * 0.12;
+    let base = open_level(snapshot)
+        * (1.0 - LED_PANEL_PUMP_DEPTH * (1.0 - snapshot.bass_pump.clamp(0.0, 1.0)));
     let breath = OscillatorBinding::new(OscillatorShape::Triangle, OscillatorInterval::Beat, 0.14)
         .with_ratio(0.5);
     let presence = smoothstep(EFFECT_PRESENCE_LOW, EFFECT_PRESENCE_HIGH, snapshot.energy_slow);
@@ -958,7 +981,7 @@ fn moonflower_dimmer(snapshot: &CueSnapshot, osc: &OscillatorFrameSnapshot) -> f
     if snapshot.trigger_blinder || snapshot.auto_blinder_active {
         value = value.max(0.88);
     }
-    value * snapshot.reactivity.max(0.2)
+    value.clamp(0.0, 1.0)
 }
 
 /// A manual / hard strobe trigger from the operator — the STROBE button, an OSC
@@ -1424,9 +1447,16 @@ fn harmonic_saturation(snapshot: &CueSnapshot, mut sat: f32) -> f32 {
     sat
 }
 
+/// The least a lit fixture's colour is driven (before the settle and the
+/// scene take their share): low enough that a quiet passage reads dark.
+const BODY_VALUE_FLOOR: f32 = 0.08;
+
 /// How bright a fixture's colour is: energy, its own dimmer, the drop.
 fn body_value(snapshot: &CueSnapshot, dimmer: f32) -> f32 {
-    (0.35 + snapshot.energy * 0.42 + dimmer * 0.32 + snapshot.drop_impact * 0.12
+    // The colour follows the fixture's own dimmer (which already carries the
+    // moment's size and the operator's contrast) down to a low floor, so an
+    // RGB fixture dips in the quiet and fills on the peak with everything else.
+    (BODY_VALUE_FLOOR + dimmer * (1.0 - BODY_VALUE_FLOOR) + snapshot.drop_impact * 0.12
         // A chord change blooms the colour body for a moment.
         + chord_accent(snapshot) * CHORD_BLOOM)
         .clamp(0.0, 1.0)
@@ -1449,7 +1479,7 @@ const SCENE_BODY_SAT: f32 = 0.94;
 const SCENE_BEAM_SAT: f32 = 0.96;
 const SCENE_SAT_CONSONANCE: f32 = 0.12;
 /// How far the drop's flash takes a fixture toward full white.
-const SCENE_FLASH_DEPTH: f32 = 0.9;
+const SCENE_FLASH_DEPTH: f32 = 1.0;
 
 /// The part a fixture plays in a scene, or `None` for the lanes a scene
 /// leaves alone: lasers and strobes are gated by the show brain, not dressed.
@@ -2616,7 +2646,11 @@ mod tests {
                 assert!((0.0..=1.0).contains(&s), "{kind:?} settled to {s}");
             }
         }
-        assert!((dynamics_dimmer_scale(&settled, StageVisualKind::LedPanel, 0, 3) - SETTLED_BODY).abs() < 1e-6);
+        // The settled level goes through the operator's contrast (reactivity).
+        let body = dynamics_dimmer_scale(&settled, StageVisualKind::LedPanel, 0, 3);
+        assert!((body - settled.contrast(SETTLED_BODY)).abs() < 1e-6);
+        let deep = CueSnapshot { reactivity: 1.0, ..settled.clone() };
+        assert!(dynamics_dimmer_scale(&deep, StageVisualKind::LedPanel, 0, 3) < body);
         // Lasers and strobes are not dimmed here: the show brain closes
         // their lanes outright in a low passage.
         assert_eq!(dynamics_dimmer_scale(&settled, StageVisualKind::Laser, 0, 3), 1.0);
