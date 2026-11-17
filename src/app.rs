@@ -5923,6 +5923,11 @@ impl eframe::App for CompellerApp {
                         let key_signal = p.get_key_detector()
                             .map(|kd| crate::emerge::KeySignal::from_key_detector(kd));
                         let lighting_metrics = p.get_lighting_metrics();
+                        // The show brain (arc, dynamics, tempo) needs the band
+                        // energies and the kick whether or not a harmonic
+                        // renderer is running to supply the rest.
+                        let brain_metrics = lighting_metrics
+                            .unwrap_or_else(|| crate::render::LightingMetrics::from_audio(&analysis));
 
                         // Last-published CueSnapshot (carries this loop's
                         // frame_time/kick for the clock resolve; the OSC thread
@@ -5980,7 +5985,7 @@ impl eframe::App for CompellerApp {
                             mode: self.control_panel.clock_override(),
                         });
                         let mut show_clock =
-                            self.dmx_manager.resolve_clock(&snapshot, lighting_metrics.as_ref());
+                            self.dmx_manager.resolve_clock(&snapshot, Some(&brain_metrics));
                         // Zero confidence during silence so soft consumers (Hue/WLED/
                         // OSC/LFO) don't lock to a ghost tempo through a quiet passage
                         // — the estimator's confidence persists when no kicks land,
@@ -6029,7 +6034,7 @@ impl eframe::App for CompellerApp {
                             // truth; hand it to DMX so the rig settles dark in a quiet
                             // break (the smoothed snapshot energy floors too high to).
                             let silent = self.silence_gate == SilenceGateState::Silent;
-                            self.dmx_manager.update(&snapshot, lighting_metrics.as_ref(), &self.fixture_overrides, silent);
+                            self.dmx_manager.update(&snapshot, Some(&brain_metrics), &self.fixture_overrides, silent);
                             // TRIG-DIAG: proves this consumer-driving block ran.
                             self.trig_diag_block_frames = self.trig_diag_block_frames.wrapping_add(1);
                         }

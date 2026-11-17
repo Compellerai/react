@@ -156,6 +156,41 @@ pub struct LightingMetrics {
     pub chroma: [f32; 12],
 }
 
+impl LightingMetrics {
+    /// What the audio analyzer alone can say, for the frames no harmonic
+    /// renderer is running to give the full picture. The show brain reads
+    /// the raw band energies (its dynamics meter and its silence test) and
+    /// the kick; without them it took a rig with no harmonic renderer for a
+    /// permanently silent one — the arc stuck on Silence, dynamics never
+    /// measured. Stateless: the smoothed harmonic fields stay at rest.
+    pub fn from_audio(analysis: &crate::audio::AudioAnalysis) -> Self {
+        let band_sum = analysis.bass + analysis.mid + analysis.high + 0.001;
+        let tonal_tension = if analysis.is_tonal { analysis.tonal_separation } else { 0.6 };
+        Self {
+            energy: analysis.energy_vis,
+            stability: analysis.stability,
+            balance: (analysis.mid + analysis.high) / band_sum,
+            tension: (1.0 - analysis.stability) * 0.5 + tonal_tension * 0.5,
+            // No beat tracker on this path: the neutral reading the cue
+            // engine's own fallback uses.
+            beat_confidence: 0.5,
+            onset: analysis.kick,
+            kick: analysis.kick,
+            onset_strength: analysis.onset_strength,
+            dominant_pc: analysis.dominant_pc as u8,
+            major_likelihood: 0.5,
+            bass: analysis.bass,
+            mid: analysis.mid,
+            high: analysis.high,
+            raw_energy: analysis.raw_bass + analysis.raw_mid + analysis.raw_high,
+            raw_bass: analysis.raw_bass,
+            raw_high: analysis.raw_high,
+            trust: 1.0,
+            ..Self::default()
+        }
+    }
+}
+
 // ============ Harmonic State History Buffer ============
 
 /// Ring buffer for harmonic state history (freeze + scrub feature)
