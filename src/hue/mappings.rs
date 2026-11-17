@@ -413,7 +413,9 @@ pub fn map_snapshot_to_lights(
         };
 
         // Global Hue output scale. Macro phases (blinder, overdrive) return early and bypass this.
-        let hue_dim = 0.85_f32;
+        // Held a little under full so a drop has somewhere to go: the drop's
+        // impact (sized by how big the passage is) opens the last 15%.
+        let hue_dim = 0.85_f32 + 0.15 * snapshot.drop_impact.clamp(0.0, 1.0) * snapshot.weight();
         let r = r * hue_dim;
         let g = g * hue_dim;
         let b = b * hue_dim;
@@ -472,7 +474,7 @@ fn compute_base_color(snapshot: &CueSnapshot, diag: bool) -> (f32, f32, f32) {
         EnergyZone::Mid => 0.7,
         EnergyZone::High => 1.0,
     };
-    let pitch_influence = (0.05 + 0.30 * snapshot.tension) * energy_gate;
+    let pitch_influence = (0.05 + 0.30 * snapshot.tension_full()) * energy_gate;
     if pitch_influence > 0.001 {
         r = lerp(r, pitch_hue.0, pitch_influence);
         g = lerp(g, pitch_hue.1, pitch_influence);
@@ -480,8 +482,8 @@ fn compute_base_color(snapshot: &CueSnapshot, diag: bool) -> (f32, f32, f32) {
     }
 
     // Tension → saturation boost (unchanged)
-    if snapshot.tension > 0.4 {
-        let sat_boost = (snapshot.tension - 0.4) * 0.5;
+    if snapshot.tension_full() > 0.4 {
+        let sat_boost = (snapshot.tension_full() - 0.4) * 0.5;
         let max = r.max(g).max(b);
         if max > 0.0 {
             r = lerp(r, if r == max { 1.0 } else { r * 0.5 }, sat_boost);
@@ -514,6 +516,9 @@ fn compute_base_color(snapshot: &CueSnapshot, diag: bool) -> (f32, f32, f32) {
 /// Reactivity applies a guaranteed brightness floor and audio drive gain
 /// so lights are never fully off during music, and bass drops always punch.
 /// Macro phase modifies beat modulation: Pump = bass³ × 1.5, Cool = 75%.
+/// What is left of the room's brightness in a fully settled passage.
+const HUE_SETTLED: f32 = 0.45;
+
 fn compute_brightness(snapshot: &CueSnapshot, diag: bool) -> f32 {
     let r = snapshot.reactivity;
 
@@ -552,8 +557,11 @@ fn compute_brightness(snapshot: &CueSnapshot, diag: bool) -> f32 {
     let slope_mod = snapshot.energy_slope * 0.15;
 
     // Tension-aware brightness boost: lifts mid-energy passages when musical tension is high
-    let tension_boost = if snapshot.tension > 0.5 {
-        (snapshot.tension - 0.5) * 0.24  // max +0.12 at tension=1.0
+    // On the song's own range: raw tension rarely passes 0.3, so against the
+    // raw signal this boost never fired.
+    let tension = snapshot.tension_full();
+    let tension_boost = if tension > 0.5 {
+        (tension - 0.5) * 0.24  // max +0.12 at tension=1.0
     } else {
         0.0
     };
@@ -566,6 +574,11 @@ fn compute_brightness(snapshot: &CueSnapshot, diag: bool) -> f32 {
 
     // Take the max of zone-based brightness and reactivity floor
     let mut result = zone_result.max(react_floor);
+
+    // Settle in a low passage. The zone reads adaptive energy, which climbs
+    // back to mid-scale inside a long breakdown; dynamics knows the low end
+    // is still out, so the room stays down until the music is back.
+    result *= HUE_SETTLED + (1.0 - HUE_SETTLED) * snapshot.weight();
 
     // Bass pump: kick-triggered brightness boost
     if snapshot.bass_pump > 0.01 {

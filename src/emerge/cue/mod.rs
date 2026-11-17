@@ -23,7 +23,7 @@ pub use lighting_cue::{
     STOP_FADE_SECS,
 };
 pub use lighting_cue_worker::LightingCueWorker;
-pub use range::{contrast_shape, intensity, Mood, MoodTracker};
+pub use range::{contrast_shape, intensity, weight, Mood, MoodTracker};
 pub use show_brain::{
     family_for, link_clock, prolink_clock, ClockInputs, ClockOverride, ShowBrain, ShowBrainFrame,
 };

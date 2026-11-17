@@ -96,7 +96,9 @@ impl OscThrottle {
         if matches!(address,
             "/react/energy" | "/react/hue"
             | "/react/excitement" | "/react/tension"
-            | "/react/env/drop_impact"
+            | "/react/env/drop_impact" | "/react/intensity"
+            | "/react/mood/tension" | "/react/mood/instability"
+            | "/react/mood/valence" | "/react/mood/polarity"
         ) {
             return (10.0, 0.02);
         }
@@ -373,7 +375,7 @@ impl OscManager {
         {
             if let Some(ref key_signal) = tick.key_signal {
                 let analysis = *engine.last_analysis();
-                self.send_continuous_values(engine.cue_engine(), config, &analysis, key_signal);
+                self.send_continuous_values(engine.cue_engine(), &tick.snapshot, config, &analysis, key_signal);
             }
         }
     }
@@ -467,6 +469,7 @@ impl OscManager {
     fn send_continuous_values(
         &mut self,
         cue_engine: &CueEngine,
+        snapshot: &crate::hue::CueSnapshot,
         config: &OscConfig,
         analysis: &AudioAnalysis,
         key_signal: &KeySignal,
@@ -478,7 +481,12 @@ impl OscManager {
 
         // Get smoothed metrics from cue engine (already consuming normalized inputs)
         let (energy, tension, balance, stability) = cue_engine.smoothed_metrics();
-        let mut brightness = energy.powf(0.7);
+        // How big the moment is (dynamics, energy, the drop) through the
+        // operator's contrast. The old `energy^0.7` sat on top of the
+        // normalizer's own ^0.7 and kept everything in the upper half.
+        let intensity = snapshot.intensity();
+        let weight = snapshot.weight();
+        let mut brightness = snapshot.contrast(intensity);
 
         // Bass pump: kick-triggered brightness boost
         let bass_pump = cue_engine.bass_pump();
@@ -502,7 +510,9 @@ impl OscManager {
             }
             AutoBlinderPhase::Normal => {
                 // Sustained mode: energy-based floor keeps lights alive
-                let floor = 0.40 + energy * 0.20;
+                // (was 0.40 + 0.20·energy, which left only the top half of
+                // the fader for the music; it settles in a low passage now.)
+                let floor = (0.12 + energy * 0.18) * (0.4 + 0.6 * weight);
                 brightness = brightness.max(floor);
             }
             _ => {}
@@ -545,7 +555,9 @@ impl OscManager {
         // FX values: tension × genre intensity, modulated by tension bank
         let tension_bank = cue_engine.tension_bank();
         let tension_bank_mod = 0.5 + 0.5 * tension_bank; // Low bank = subtle, high bank = dramatic
-        let fx_intensity = (tension * genre.mover_intensity * tension_bank_mod).min(1.0);
+        // Tension on the song's own range: raw tension rarely leaves 0.1–0.3,
+        // which kept the FX index at 0.
+        let fx_intensity = (snapshot.tension_full() * genre.mover_intensity * tension_bank_mod).min(1.0);
         let fx_index = if fx_intensity > 0.7 { 3 }
             else if fx_intensity > 0.5 { 2 }
             else if fx_intensity > 0.3 { 1 }
@@ -586,6 +598,19 @@ impl OscManager {
         }
         if self.throttle.should_send("/react/stability", stability) {
             self.send_translated(config, sender, "/react/stability", vec![rosc::OscType::Float(stability)]);
+        }
+        // The moment's size and the mood on its full 0..1 range, for rigs
+        // that want to map their own looks to them.
+        for (address, value) in [
+            ("/react/intensity", intensity),
+            ("/react/mood/tension", snapshot.tension_full()),
+            ("/react/mood/instability", snapshot.instability_full()),
+            ("/react/mood/valence", snapshot.valence_full()),
+            ("/react/mood/polarity", snapshot.polarity_strength_full()),
+        ] {
+            if self.throttle.should_send(address, value) {
+                self.send_translated(config, sender, address, vec![rosc::OscType::Float(value)]);
+            }
         }
         if self.throttle.should_send("/react/hue", hue) {
             self.send_translated(config, sender, "/react/hue", vec![rosc::OscType::Float(hue)]);

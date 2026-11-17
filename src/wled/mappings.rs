@@ -206,6 +206,9 @@ fn pitch_target(snapshot: &CueSnapshot) -> (f32, f32, f32) {
     }
 }
 
+/// What is left of a strip's brightness in a fully settled passage.
+const WLED_SETTLED: f32 = 0.4;
+
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
@@ -396,7 +399,7 @@ pub fn render_pulse(
 
     // Blend in chroma-weighted pitch color for richer harmonic color
     let (cr, cg, cb) = chroma_to_rgb(&bands.chroma);
-    let chroma_weight = 0.15 + 0.30 * snapshot.tension;
+    let chroma_weight = 0.15 + 0.30 * snapshot.tension_full();
     r = lerp(r, cr, chroma_weight);
     g = lerp(g, cg, chroma_weight);
     b = lerp(b, cb, chroma_weight);
@@ -404,7 +407,7 @@ pub fn render_pulse(
     // Pitch hue rotation — dominant pitch, or the all-notes blend when "Dom"
     // is un-checked (the :383 chroma blend above stays as added richness).
     let (pr, pg, pb) = pitch_target(snapshot);
-    let pitch_weight = 0.10 + 0.20 * snapshot.tension;
+    let pitch_weight = 0.10 + 0.20 * snapshot.tension_full();
     r = lerp(r, pr, pitch_weight);
     g = lerp(g, pg, pitch_weight);
     b = lerp(b, pb, pitch_weight);
@@ -423,7 +426,13 @@ pub fn render_pulse(
 
     // Bass-driven brightness pulsing
     let bass_pulse = bands.bass * 0.35;
-    let brightness = (zone_brightness + bass_pulse + snapshot.energy * 0.15).clamp(0.05, 1.0);
+    // Settle in a low passage (the zone reads adaptive energy, which drifts
+    // back up inside a long breakdown), and let a drop reach the top.
+    let weight = snapshot.weight();
+    let settled = WLED_SETTLED + (1.0 - WLED_SETTLED) * weight;
+    let brightness = ((zone_brightness + bass_pulse + snapshot.energy * 0.15) * settled)
+        .max(snapshot.drop_impact.clamp(0.0, 1.0) * weight)
+        .clamp(0.03, 1.0);
 
     let pixel = to_u8(r * brightness, g * brightness, b * brightness);
     vec![pixel; led_count]

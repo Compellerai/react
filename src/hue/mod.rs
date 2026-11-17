@@ -519,6 +519,12 @@ impl CueSnapshot {
         crate::emerge::cue::intensity(self.dynamics, self.energy, self.drop_impact)
     }
 
+    /// How much of the range this passage opens: 0 in a breakdown, 1 with
+    /// everything in (from `dynamics`).
+    pub fn weight(&self) -> f32 {
+        crate::emerge::cue::weight(self.dynamics)
+    }
+
     /// Tension on the song's own full range (raw `tension` where no mood
     /// tracker has stamped the snapshot).
     pub fn tension_full(&self) -> f32 {

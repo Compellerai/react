@@ -113,13 +113,19 @@ fn smoothstep(lo: f32, hi: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
+/// How much of the range a passage of this `dynamics` opens: 0 in a low
+/// passage (a breakdown), 1 with everything in.
+pub fn weight(dynamics: f32) -> f32 {
+    ((dynamics - DYNAMICS_SETTLED) / (DYNAMICS_OPEN - DYNAMICS_SETTLED)).clamp(0.0, 1.0)
+}
+
 /// One number for how big the moment is, 0..1, that every output's level can
 /// hang off. `dynamics` (absolute: how big the passage is on the set's own
 /// scale) decides how much of the range is open; adaptive `energy` (where in
 /// that passage the music is) places it inside; a drop's impact lifts it to
 /// the top. A breakdown reads near 0, a groove ~0.7, a drop 1.
 pub fn intensity(dynamics: f32, energy: f32, drop_impact: f32) -> f32 {
-    let weight = ((dynamics - DYNAMICS_SETTLED) / (DYNAMICS_OPEN - DYNAMICS_SETTLED)).clamp(0.0, 1.0);
+    let weight = weight(dynamics);
     let push = smoothstep(PUSH_LO, PUSH_HI, energy);
     let level = weight * (FULL_WEIGHT_FLOOR + (1.0 - FULL_WEIGHT_FLOOR) * push);
     (level + DROP_LIFT * drop_impact.clamp(0.0, 1.0) * weight.max(0.5)).clamp(0.0, 1.0)
